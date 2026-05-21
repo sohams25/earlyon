@@ -8,7 +8,7 @@ Cron tag: `earlyon-backlog-cron-v1`
 
 ## tier 1 — small, safe (cron-eligible)
 
-- [ ] **flops overcount warning**: in `earlyon/core/flops.py`, log a warning when `running / total > 1.05` before applying the `min(..., 1.0)` cap. Add a unit test that asserts the warning fires on a synthetic overcount case.
+- [x] **flops overcount warning**: in `earlyon/core/flops.py`, log a warning when `running / total > 1.05` before applying the `min(..., 1.0)` cap. Add a unit test that asserts the warning fires on a synthetic overcount case.
 - [ ] **load_wrapper config length check**: in `earlyon/utils.py:load_wrapper`, validate `len(cfg["confidence_thresholds"])` against `len(model.config.exit_points)` BEFORE mutating any config fields. Raise `ValueError` with a clear message on mismatch. Add a unit test.
 - [ ] **stage2 accuracy field clarity**: in `earlyon/training/two_stage_trainer.py`, the `accuracy` field of `TrainStepLog` reports exit_0 only. Either rename to `exit0_accuracy` or add a per-exit breakdown. Update tests and the example script.
 - [ ] **readme latency footnote move**: move the wrapper-latency column out of the headline results table into a footnote/appendix in `README.md`. The headline table should only show: test acc, baseline acc, avg flops used, % samples exiting early.
