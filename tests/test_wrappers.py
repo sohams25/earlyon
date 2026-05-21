@@ -108,3 +108,28 @@ def test_computation_used_monotonic_across_exits():
     values = [flops_at[ep.layer_name] for ep in wrapper.config.exit_points]
     assert values == sorted(values)
     assert all(0 < v <= 1 for v in values)
+
+
+def test_training_mode_repeated_calls_do_not_accumulate():
+    wrapper, _ = _build()
+    x = torch.randn(2, 3, 32, 32)
+    out1 = wrapper(x, mode="training")
+    out2 = wrapper(x, mode="training")
+    assert len(out1) == 4 and len(out2) == 4
+
+
+def test_inference_mode_reset_after_final_classifier_error():
+    """If _final_classifier raises, the wrapper must still reset inference
+    mode so subsequent training calls behave correctly."""
+    wrapper, _ = _build(thresholds=(1.0, 1.0, 1.0))
+
+    def bad_classifier(x):
+        raise RuntimeError("simulated downstream error")
+
+    wrapper._final_classifier = bad_classifier
+    with pytest.raises(RuntimeError, match="simulated"):
+        wrapper(torch.randn(1, 3, 32, 32), mode="inference")
+    # inference flag must be off — training mode should now collect outputs
+    wrapper._final_classifier = lambda v: v
+    out = wrapper(torch.randn(2, 3, 32, 32), mode="training")
+    assert len(out) == 4
