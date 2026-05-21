@@ -1,4 +1,5 @@
 from earlyon.benchmarking.accuracy_vs_exit import AccuracyReport, evaluate
+from earlyon.benchmarking.jetson_profiler import JetsonProfiler, JetsonRun, JetsonSample
 from earlyon.benchmarking.throughput import (
     BenchmarkResult,
     benchmark_backbone,
@@ -11,4 +12,7 @@ __all__ = [
     "benchmark_backbone",
     "AccuracyReport",
     "evaluate",
+    "JetsonProfiler",
+    "JetsonRun",
+    "JetsonSample",
 ]
