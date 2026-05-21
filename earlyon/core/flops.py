@@ -8,6 +8,7 @@ order, without double-counting the container module.
 
 from __future__ import annotations
 
+import warnings
 from typing import Sequence
 
 import torch
@@ -65,6 +66,17 @@ def per_layer_flops(
             cumulative[layer] = (list(layer_names).index(layer) + 1) / (n + 1)
             continue
         running = sum(int(by_module.get(ordered_leaves[i], 0)) for i in range(last_idx + 1))
-        cumulative[layer] = min(running / total, 1.0)
+        ratio = running / total
+        if ratio > 1.05:
+            # latent overcount: either fvcore.total() underreports for
+            # partially-supported ops, or our leaf walk picked up something it
+            # shouldn't. clamp below for safety but surface the discrepancy.
+            warnings.warn(
+                f"flops accounting overcount at layer {layer!r}: "
+                f"running/total={ratio:.3f} (> 1.05); clamping to 1.0",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        cumulative[layer] = min(ratio, 1.0)
 
     return cumulative
