@@ -55,3 +55,32 @@ def test_mobilenetv2_identity_invariant():
         direct = model.backbone(x)
     assert result.exit_taken == -1
     assert torch.allclose(result.prediction, direct, atol=1e-5)
+
+
+def test_efficientnet_b0_builds_and_routes():
+    from earlyon.models import efficientnet_b0_ee
+    model = efficientnet_b0_ee(num_classes=10, pretrained=False)
+    model.eval()
+    assert len(model.config.exit_points) == 2
+
+    x = torch.randn(1, 3, 224, 224)
+    with torch.no_grad():
+        outs = model(x, mode="training")
+    assert len(outs) == 3
+
+    with torch.no_grad():
+        result = model(x, mode="inference")
+    assert result.prediction.shape == (1, 10)
+
+
+def test_efficientnet_b0_identity_invariant():
+    from earlyon.models import efficientnet_b0_ee
+    model = efficientnet_b0_ee(num_classes=10, pretrained=False)
+    model.config.confidence_thresholds = [1.0, 1.0]
+    model.eval()
+    x = torch.randn(1, 3, 224, 224)
+    with torch.no_grad():
+        result = model(x, mode="inference")
+        direct = model.backbone(x)
+    assert result.exit_taken == -1
+    assert torch.allclose(result.prediction, direct, atol=1e-4)

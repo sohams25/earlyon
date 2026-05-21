@@ -9,12 +9,13 @@ import torch
 from torch.utils.data import DataLoader, Subset
 
 from earlyon.core.wrappers import EarlyExitWrapper
-from earlyon.models import mobilenetv2_ee, resnet18_ee, resnet50_ee
+from earlyon.models import efficientnet_b0_ee, mobilenetv2_ee, resnet18_ee, resnet50_ee
 
 FACTORIES = {
     "resnet18": resnet18_ee,
     "resnet50": resnet50_ee,
     "mobilenetv2": mobilenetv2_ee,
+    "efficientnet_b0": efficientnet_b0_ee,
 }
 
 

@@ -19,7 +19,7 @@ from earlyon.core.thresholds import calibrate_thresholds
 from earlyon.training import stage1_train_backbone, stage2_train_exits
 from earlyon.utils import build_model, cifar10_loaders, load_wrapper, save_wrapper
 
-BACKBONES = ["resnet18", "resnet50", "mobilenetv2"]
+BACKBONES = ["resnet18", "resnet50", "mobilenetv2", "efficientnet_b0"]
 
 
 def _device(name: str) -> str:
@@ -235,6 +235,8 @@ def analyze(model_path: str, dataset: str, device: str) -> None:
             indent=2,
         )
     )
+
+
 
 
 if __name__ == "__main__":
