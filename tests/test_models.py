@@ -59,6 +59,7 @@ def test_mobilenetv2_identity_invariant():
 
 def test_efficientnet_b0_builds_and_routes():
     from earlyon.models import efficientnet_b0_ee
+
     model = efficientnet_b0_ee(num_classes=10, pretrained=False)
     model.eval()
     assert len(model.config.exit_points) == 2
@@ -75,6 +76,7 @@ def test_efficientnet_b0_builds_and_routes():
 
 def test_efficientnet_b0_identity_invariant():
     from earlyon.models import efficientnet_b0_ee
+
     model = efficientnet_b0_ee(num_classes=10, pretrained=False)
     model.config.confidence_thresholds = [1.0, 1.0]
     model.eval()

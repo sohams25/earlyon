@@ -237,7 +237,5 @@ def analyze(model_path: str, dataset: str, device: str) -> None:
     )
 
 
-
-
 if __name__ == "__main__":
     main()

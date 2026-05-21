@@ -33,8 +33,7 @@ def efficientnet_b0_ee(num_classes: int, pretrained: bool = True) -> EarlyExitWr
         ExitPoint("e1", "features.5", _EFFNET_B0_CHANNELS["features.5"]),
     ]
     heads = {
-        ep.name: EarlyExitHead(ep.in_channels, num_classes, hidden_dim=128)
-        for ep in exit_points
+        ep.name: EarlyExitHead(ep.in_channels, num_classes, hidden_dim=128) for ep in exit_points
     }
     cfg = EarlyExitConfig(
         backbone="efficientnet_b0",

@@ -1,5 +1,9 @@
 # earlyon
 
+[![ci](https://github.com/sohams25/earlyon/actions/workflows/ci.yml/badge.svg)](https://github.com/sohams25/earlyon/actions/workflows/ci.yml)
+[![python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://pypi.org/project/earlyon/)
+[![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 production-ready early exit for PyTorch CV models.
 
 ```bash

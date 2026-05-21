@@ -22,6 +22,7 @@ def _is_compiling() -> bool:
     """True if running inside torch.compile / dynamo tracing."""
     try:
         import torch._dynamo as dynamo
+
         return dynamo.is_compiling()
     except Exception:
         return False
@@ -200,7 +201,9 @@ class EarlyExitWrapper(nn.Module):
                 per_sample_conf = probs.max(dim=-1).values
                 if (per_sample_conf >= threshold).all():
                     raise _EarlyExitSignal(
-                        exit_idx, logits, float(per_sample_conf.min()),
+                        exit_idx,
+                        logits,
+                        float(per_sample_conf.min()),
                         per_sample_confidence=per_sample_conf,
                     )
             else:
