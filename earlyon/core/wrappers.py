@@ -9,13 +9,16 @@ short-circuit an opaque ``nn.Module.forward`` from inside a hook.
 from __future__ import annotations
 
 import threading
-from typing import Callable, Iterator, Optional
+from typing import TYPE_CHECKING, Callable, Iterator, Optional
 
 import torch
 import torch.nn as nn
 
 from earlyon.core.flops import per_layer_flops
 from earlyon.core.types import EarlyExitConfig, InferenceResult
+
+if TYPE_CHECKING:
+    from earlyon.core.types import BatchedInferenceResult
 
 
 def _is_compiling() -> bool:
