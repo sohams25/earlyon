@@ -44,17 +44,25 @@ def test_backbone_baseline_runs():
     assert r.avg_computation_used == 1.0
 
 
-def test_wrapper_overhead_when_no_exits_trigger():
-    """The architect's key invariant: wrapping should add <30% overhead on a
-    tiny model when no exits fire (threshold=1.0). On real models the
-    fraction is much smaller; tiny models have such low absolute latency
-    that hook overhead is a larger fraction."""
-    model = _build(thresholds=(1.0, 1.0))  # no exit will ever fire
-    wrap_r = benchmark_wrapper(model, input_shape=(1, 3, 32, 32), num_warmup=10, num_runs=50)
-    bb_r = benchmark_backbone(model.backbone, input_shape=(1, 3, 32, 32), num_warmup=10, num_runs=50)
+def test_wrapper_overhead_on_real_model_is_modest():
+    """The architect's key invariant — measured on a real backbone, not the
+    tiny fixture. Hook + softmax overhead must stay under 25% of backbone
+    latency when no exits ever fire. (On tiny fixtures absolute latency is
+    microseconds so any per-iter overhead dominates; this test only makes
+    sense on a real model.)"""
+    import pytest
+    try:
+        from earlyon.models import resnet18_ee
+    except Exception:
+        pytest.skip("torchvision not available")
+    model = resnet18_ee(num_classes=10, pretrained=False)
+    model.config.confidence_thresholds = [1.0, 1.0]  # no exit can fire
+    wrap_r = benchmark_wrapper(model, input_shape=(1, 3, 224, 224),
+                                num_warmup=10, num_runs=30)
+    bb_r = benchmark_backbone(model.backbone, input_shape=(1, 3, 224, 224),
+                               num_warmup=10, num_runs=30)
     overhead = (wrap_r.latency_median_ms - bb_r.latency_median_ms) / bb_r.latency_median_ms
-    # tiny model; allow generous slack
-    assert overhead < 0.50, f"hook overhead too high on tiny model: {overhead:.1%}"
+    assert overhead < 0.25, f"hook overhead too high: {overhead:.1%}"
 
 
 def test_evaluate_loop_runs():
