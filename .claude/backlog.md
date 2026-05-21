@@ -11,7 +11,7 @@ Cron tag: `earlyon-backlog-cron-v1`
 - [x] **flops overcount warning**: in `earlyon/core/flops.py`, log a warning when `running / total > 1.05` before applying the `min(..., 1.0)` cap. Add a unit test that asserts the warning fires on a synthetic overcount case.
 - [x] **load_wrapper config length check**: in `earlyon/utils.py:load_wrapper`, validate `len(cfg["confidence_thresholds"])` against `len(model.config.exit_points)` BEFORE mutating any config fields. Raise `ValueError` with a clear message on mismatch. Add a unit test.
 - [x] **stage2 accuracy field clarity**: in `earlyon/training/two_stage_trainer.py`, the `accuracy` field of `TrainStepLog` reports exit_0 only. Either rename to `exit0_accuracy` or add a per-exit breakdown. Update tests and the example script.
-- [ ] **readme latency footnote move**: move the wrapper-latency column out of the headline results table into a footnote/appendix in `README.md`. The headline table should only show: test acc, baseline acc, avg flops used, % samples exiting early.
+- [x] **readme latency footnote move**: move the wrapper-latency column out of the headline results table into a footnote/appendix in `README.md`. The headline table should only show: test acc, baseline acc, avg flops used, % samples exiting early.
 - [x] **default_log print comment**: in `earlyon/training/two_stage_trainer.py:_default_log`, add a one-line comment explaining that `print()` is intentional for a user-facing CLI default callback.
 - [ ] **code of conduct**: add `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1) at repo root.
 - [ ] **security policy**: add `SECURITY.md` at repo root with a simple disclosure address.
