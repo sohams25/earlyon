@@ -133,3 +133,49 @@ def test_inference_mode_reset_after_final_classifier_error():
     wrapper._final_classifier = lambda v: v
     out = wrapper(torch.randn(2, 3, 32, 32), mode="training")
     assert len(out) == 4
+
+
+def test_standalone_backbone_call_does_not_fire_hooks():
+    """When the wrapper's backbone is called directly (e.g. stage 1 training),
+    exit heads must not fire. Otherwise a backbone-only `.to(device)` leaves
+    the heads on cpu and causes a device-mismatch error.
+    """
+    wrapper, backbone = _build()
+    wrapper.eval()
+    x = torch.randn(2, 3, 32, 32)
+    # Move only the backbone (mimics stage1_train_backbone)
+    out_direct = backbone(x)
+    # The hook must have been a no-op: no exception, no head invocation
+    assert out_direct.shape == (2, 10)
+
+
+def test_batched_inference_routes_all_or_none():
+    """Per-batch routing: if all samples meet threshold, batch exits early."""
+    from earlyon.core.types import BatchedInferenceResult
+
+    wrapper, _ = _build(thresholds=(0.0, 0.0, 0.0))  # always exit at e0
+    wrapper.eval()
+    x = torch.randn(4, 3, 32, 32)
+    with torch.no_grad():
+        result = wrapper.forward_inference_batched(x)
+    assert isinstance(result, BatchedInferenceResult)
+    assert result.predictions.shape == (4, 10)
+    assert result.exit_taken == 0
+    assert result.per_sample_confidence.shape == (4,)
+    assert result.computation_used < 1.0
+
+
+def test_batched_inference_high_threshold_falls_through_to_final():
+    wrapper, _ = _build(thresholds=(1.0, 1.0, 1.0))
+    wrapper.eval()
+    x = torch.randn(4, 3, 32, 32)
+    with torch.no_grad():
+        result = wrapper.forward_inference_batched(x)
+    assert result.exit_taken == -1
+    assert result.computation_used == 1.0
+
+
+def test_batched_inference_empty_batch_raises():
+    wrapper, _ = _build()
+    with pytest.raises(ValueError, match="empty batch"):
+        wrapper.forward_inference_batched(torch.zeros(0, 3, 32, 32))

@@ -70,3 +70,18 @@ class InferenceResult:
     exit_taken: int
     confidence: float
     computation_used: float
+
+
+@dataclass
+class BatchedInferenceResult:
+    """Result of a batched inference pass with per-batch routing.
+
+    All samples in the batch exit together at ``exit_taken``. The
+    ``per_sample_confidence`` tensor records each sample's confidence at the
+    exit point.
+    """
+
+    predictions: torch.Tensor
+    exit_taken: int
+    per_sample_confidence: torch.Tensor
+    computation_used: float
