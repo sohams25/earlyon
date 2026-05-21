@@ -1,0 +1,44 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+.venv/
+venv/
+env/
+.python-version
+
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.mypy_cache/
+.ruff_cache/
+
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# model artifacts
+*.pth
+*.pt
+*.onnx
+checkpoints/
+runs/
+wandb/
+
+# data
+data/
+datasets/
+*.tar.gz
+
+# secrets
+.env
+.env.*
+!.env.example

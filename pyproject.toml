@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "earlyon"
+version = "0.1.0"
+description = "Production-ready early exit for PyTorch CV models."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Soham", email = "sohams.web@gmail.com" }]
+keywords = ["pytorch", "early-exit", "inference", "edge", "jetson", "branchynet"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "click>=8.0",
+    "numpy>=1.23",
+    "fvcore>=0.1.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "isort>=5.12",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/sohams-web/earlyon"
+Repository = "https://github.com/sohams-web/earlyon"
+Issues = "https://github.com/sohams-web/earlyon/issues"
+
+[project.scripts]
+earlyon = "earlyon.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["earlyon*"]
+exclude = ["tests*", "examples*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: requires a CUDA device",
+    "slow: tests that take >10s",
+]
+addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+source = ["earlyon"]
+omit = ["earlyon/cli.py"]
