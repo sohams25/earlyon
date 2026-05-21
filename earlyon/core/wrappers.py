@@ -117,6 +117,22 @@ class EarlyExitWrapper(nn.Module):
     def backbone_parameters(self) -> Iterator[nn.Parameter]:
         yield from self.backbone.parameters()
 
+    def _init_tls(self) -> None:
+        """Ensure per-thread state has the expected schema. Without this, a
+        wrapper called for the first time on a fresh thread (e.g. a
+        DataParallel replica) would silently no-op the hook because
+        ``training_outputs`` and ``in_training`` are missing on this
+        thread's ``threading.local`` and the getattr default discards
+        appended logits."""
+        if not hasattr(self._tls, "training_outputs"):
+            self._tls.training_outputs = []
+        if not hasattr(self._tls, "in_training"):
+            self._tls.in_training = False
+        if not hasattr(self._tls, "inference_mode"):
+            self._tls.inference_mode = False
+        if not hasattr(self._tls, "batched_mode"):
+            self._tls.batched_mode = False
+
     def forward_inference_batched(self, x: torch.Tensor) -> "BatchedInferenceResult":
         """Conservative per-batch routing for batch_size > 1.
 
@@ -133,6 +149,7 @@ class EarlyExitWrapper(nn.Module):
         if x.size(0) < 1:
             raise ValueError("empty batch")
 
+        self._init_tls()
         self._tls.inference_mode = True
         self._tls.batched_mode = True
         try:
@@ -224,6 +241,7 @@ class EarlyExitWrapper(nn.Module):
         return hook
 
     def _forward_training(self, x: torch.Tensor) -> list[torch.Tensor]:
+        self._init_tls()
         self._tls.training_outputs = []
         self._tls.inference_mode = False
         self._tls.in_training = True
@@ -236,6 +254,7 @@ class EarlyExitWrapper(nn.Module):
             self._tls.in_training = False
 
     def _forward_inference(self, x: torch.Tensor) -> InferenceResult:
+        self._init_tls()
         self._tls.inference_mode = True
         try:
             try:

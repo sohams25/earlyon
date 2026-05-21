@@ -179,3 +179,28 @@ def test_batched_inference_empty_batch_raises():
     wrapper, _ = _build()
     with pytest.raises(ValueError, match="empty batch"):
         wrapper.forward_inference_batched(torch.zeros(0, 3, 32, 32))
+
+
+def test_training_mode_on_fresh_thread_does_not_drop_outputs():
+    """The threading.local must have its schema set before the hook fires.
+    Without _init_tls, a fresh thread sees a missing training_outputs
+    attribute and the getattr default '[]' is discarded — silently
+    producing only the final classifier logit and a wrong loss.
+    """
+    import threading
+
+    wrapper, _ = _build()
+    x = torch.randn(2, 3, 32, 32)
+    captured = {}
+
+    def run():
+        captured["outputs"] = wrapper(x, mode="training")
+
+    t = threading.Thread(target=run)
+    t.start()
+    t.join()
+
+    assert "outputs" in captured
+    assert len(captured["outputs"]) == 4  # 3 exits + final
+    for o in captured["outputs"]:
+        assert o.shape == (2, 10)
