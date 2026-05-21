@@ -1,4 +1,10 @@
-"""FLOPs accounting helpers. Uses fvcore but degrades gracefully."""
+"""FLOPs accounting helpers.
+
+Uses fvcore for per-module flops. The non-trivial part is: when an exit point
+is a nested module like ``features.3`` (MobileNetV2), we need to sum the flops
+of every LEAF op executed before and including ``features.3`` in forward
+order, without double-counting the container module.
+"""
 
 from __future__ import annotations
 
@@ -13,23 +19,20 @@ def per_layer_flops(
     layer_names: Sequence[str],
     input_shape: tuple[int, int, int, int] = (1, 3, 224, 224),
 ) -> dict[str, float]:
-    """Return cumulative FLOPs fraction at each named layer.
+    """Return the cumulative FLOPs fraction at each named layer.
 
-    Cumulative meaning: at layer L, the value is (FLOPs of layers up to and
-    including L) / (total backbone FLOPs). Used to populate
-    ``InferenceResult.computation_used``.
+    At layer L the value is (FLOPs of every leaf op executed up to and
+    including L) / (total backbone FLOPs). The result is monotonic in
+    forward order and bounded in [0, 1].
     """
     try:
         from fvcore.nn import FlopCountAnalysis
     except ImportError:
-        # fallback: uniform spacing
         n = len(layer_names)
         return {name: (i + 1) / (n + 1) for i, name in enumerate(layer_names)}
 
     backbone.eval()
     dummy = torch.zeros(input_shape)
-
-    # capture per-module flops
     fca = FlopCountAnalysis(backbone, dummy)
     fca.unsupported_ops_warnings(False)
     fca.uncalled_modules_warnings(False)
@@ -40,21 +43,33 @@ def per_layer_flops(
         n = len(layer_names)
         return {name: (i + 1) / (n + 1) for i, name in enumerate(layer_names)}
 
-    # cumulative walk: sum flops of all named-children encountered up to (and
-    # including) each target layer in declaration order
-    cumulative: dict[str, float] = {}
-    running = 0
-    ordered_modules = [n for n, _ in backbone.named_modules() if n]
-    target_set = set(layer_names)
-    for mod_name in ordered_modules:
-        # only count top-level-ish modules: those whose name has no dot
-        # OR matches one of the layer_names (so we credit it correctly)
-        if "." not in mod_name or mod_name in target_set:
-            running += int(by_module.get(mod_name, 0))
-        if mod_name in target_set:
-            cumulative[mod_name] = running / total
+    # Forward order = order returned by named_modules. Filter to leaves only
+    # (modules with no children) to avoid double-counting containers.
+    ordered_leaves = [
+        name
+        for name, mod in backbone.named_modules()
+        if name and len(list(mod.children())) == 0
+    ]
+    order_idx = {name: i for i, name in enumerate(ordered_leaves)}
 
-    # fill any missing target with uniform fallback
-    for i, name in enumerate(layer_names):
-        cumulative.setdefault(name, (i + 1) / (len(layer_names) + 1))
+    # The "end" of an exit at layer L is the last leaf whose name belongs to
+    # L (equals L or is nested under it). Anything past that point hasn't run
+    # yet when the exit fires.
+    cumulative: dict[str, float] = {}
+    for layer in layer_names:
+        last_idx = -1
+        for i, leaf in enumerate(ordered_leaves):
+            if leaf == layer or leaf.startswith(layer + "."):
+                last_idx = i
+        if last_idx < 0:
+            # target isn't a leaf or doesn't contain leaves: fall back to
+            # uniform spacing for this entry
+            n = len(layer_names)
+            cumulative[layer] = (list(layer_names).index(layer) + 1) / (n + 1)
+            continue
+        running = sum(
+            int(by_module.get(ordered_leaves[i], 0)) for i in range(last_idx + 1)
+        )
+        cumulative[layer] = min(running / total, 1.0)
+
     return cumulative
