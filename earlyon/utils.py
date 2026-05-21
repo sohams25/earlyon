@@ -41,7 +41,8 @@ def save_wrapper(model: EarlyExitWrapper, path: str | Path) -> None:
 
 
 def load_wrapper(path: str | Path, pretrained_backbone: bool = False) -> EarlyExitWrapper:
-    payload = torch.load(Path(path), map_location="cpu", weights_only=False)
+    # weights_only=True prevents pickle code-exec from malicious .pth files
+    payload = torch.load(Path(path), map_location="cpu", weights_only=True)
     cfg = payload["config"]
     model = build_model(cfg["backbone"], cfg["num_classes"], pretrained=pretrained_backbone)
     model.config.confidence_thresholds = list(cfg["confidence_thresholds"])
