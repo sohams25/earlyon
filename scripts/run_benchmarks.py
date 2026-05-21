@@ -29,10 +29,11 @@ OUT_DIR = ROOT / "docs"
 OUT_DIR.mkdir(exist_ok=True)
 OUT_JSON = OUT_DIR / "benchmarks.json"
 
+# fine-tuning from imagenet pretrained -- a few epochs is enough for cifar10
 PLAN = {
-    "resnet18":    {"batch": 128, "stage1_epochs": 20, "stage2_epochs": 10, "lr1": 0.01},
-    "resnet50":    {"batch":  32, "stage1_epochs": 15, "stage2_epochs":  8, "lr1": 0.01},
-    "mobilenetv2": {"batch":  96, "stage1_epochs": 20, "stage2_epochs": 10, "lr1": 0.005},
+    "resnet18":    {"batch": 128, "stage1_epochs": 4, "stage2_epochs": 4, "lr1": 0.005},
+    "resnet50":    {"batch":  32, "stage1_epochs": 3, "stage2_epochs": 3, "lr1": 0.005},
+    "mobilenetv2": {"batch":  96, "stage1_epochs": 4, "stage2_epochs": 4, "lr1": 0.002},
 }
 
 
