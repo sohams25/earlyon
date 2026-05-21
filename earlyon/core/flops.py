@@ -46,11 +46,8 @@ def per_layer_flops(
     # Forward order = order returned by named_modules. Filter to leaves only
     # (modules with no children) to avoid double-counting containers.
     ordered_leaves = [
-        name
-        for name, mod in backbone.named_modules()
-        if name and len(list(mod.children())) == 0
+        name for name, mod in backbone.named_modules() if name and len(list(mod.children())) == 0
     ]
-    order_idx = {name: i for i, name in enumerate(ordered_leaves)}
 
     # The "end" of an exit at layer L is the last leaf whose name belongs to
     # L (equals L or is nested under it). Anything past that point hasn't run
@@ -67,9 +64,7 @@ def per_layer_flops(
             n = len(layer_names)
             cumulative[layer] = (list(layer_names).index(layer) + 1) / (n + 1)
             continue
-        running = sum(
-            int(by_module.get(ordered_leaves[i], 0)) for i in range(last_idx + 1)
-        )
+        running = sum(int(by_module.get(ordered_leaves[i], 0)) for i in range(last_idx + 1))
         cumulative[layer] = min(running / total, 1.0)
 
     return cumulative
