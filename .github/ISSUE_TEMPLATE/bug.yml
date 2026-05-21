@@ -1,0 +1,39 @@
+name: bug
+description: report a bug or unexpected behavior
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: earlyon version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: torch
+    attributes:
+      label: torch version + device
+      placeholder: "2.3.0 + CUDA 12.1"
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: minimal reproducer
+      description: a short script that triggers the bug
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: what happened
+      description: include the full traceback if any
+    validations:
+      required: true

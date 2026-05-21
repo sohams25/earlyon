@@ -43,3 +43,5 @@ datasets/
 .env.*
 !.env.example
 raw_earlyon.md
+logs/
+docs/*.pth
