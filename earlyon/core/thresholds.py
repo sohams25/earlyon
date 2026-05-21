@@ -57,11 +57,13 @@ def calibrate_thresholds(
     n = len(model.config.exit_points)
 
     # start fully conservative -- no exits will fire
-    original = list(model.config.confidence_thresholds)
     best = [1.0] * n
     model.config.confidence_thresholds = list(best)
     baseline_acc, _ = _evaluate(model, val_loader, device)
 
+    # iterate the full grid per exit. an early break would miss thresholds
+    # that pass after a transient miss (val accuracy isn't monotone in threshold
+    # on small sets). keep the lowest passing threshold seen.
     for exit_idx in range(n):
         for thr in grid:
             trial = list(best)
@@ -69,15 +71,13 @@ def calibrate_thresholds(
             model.config.confidence_thresholds = list(trial)
             acc, _ = _evaluate(model, val_loader, device)
             if baseline_acc - acc <= target_accuracy_drop:
-                best[exit_idx] = thr
-            else:
-                break
+                # the grid is ordered high->low so the most recently passing
+                # threshold is the lowest one that satisfies the constraint
+                if thr < best[exit_idx]:
+                    best[exit_idx] = thr
 
     model.config.confidence_thresholds = list(best)
     final_acc, avg_comp = _evaluate(model, val_loader, device)
-    # restore-or-keep: we keep the calibrated thresholds set on the model,
-    # but return original for reference if needed (not used currently)
-    _ = original
     return CalibrationResult(
         thresholds=best,
         baseline_accuracy=baseline_acc,
