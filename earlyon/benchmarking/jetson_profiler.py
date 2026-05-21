@@ -102,6 +102,9 @@ class TegrastatsMonitor:
                 self._proc.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 self._proc.kill()
+        # join the reader so we don't drop a live thread holding the pipe
+        if self._thread is not None:
+            self._thread.join(timeout=1)
         self._proc = None
         self._thread = None
 
