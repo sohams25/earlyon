@@ -33,7 +33,7 @@ OUT_JSON = OUT_DIR / "benchmarks.json"
 PLAN = {
     "resnet18":    {"batch": 128, "stage1_epochs": 4, "stage2_epochs": 4, "lr1": 0.005},
     "resnet50":    {"batch":  32, "stage1_epochs": 3, "stage2_epochs": 3, "lr1": 0.005},
-    "mobilenetv2": {"batch":  96, "stage1_epochs": 4, "stage2_epochs": 4, "lr1": 0.002},
+    "mobilenetv2": {"batch":  32, "stage1_epochs": 4, "stage2_epochs": 4, "lr1": 0.002},
 }
 
 
