@@ -8,6 +8,7 @@ short-circuit an opaque ``nn.Module.forward`` from inside a hook.
 
 from __future__ import annotations
 
+import threading
 from typing import Callable, Iterator, Optional
 
 import torch
@@ -74,10 +75,10 @@ class EarlyExitWrapper(nn.Module):
             backbone, layer_names, input_shape
         )
 
-        # caches used during a single forward pass
-        self._training_outputs: list[torch.Tensor] = []
-        self._inference_mode = False
-        self._inference_thresholds: list[float] = []
+        # per-thread caches: a single wrapper instance can be called from
+        # multiple threads (DataParallel, inference servers). state lives in
+        # threading.local so concurrent training/inference calls don't collide.
+        self._tls = threading.local()
 
         self._hook_handles: list[torch.utils.hooks.RemovableHandle] = []
         self._register_hooks()
@@ -114,7 +115,7 @@ class EarlyExitWrapper(nn.Module):
         def hook(module: nn.Module, inputs, output):
             head = self.exit_heads[exit_name]
             logits = head(output)
-            if self._inference_mode:
+            if getattr(self._tls, "inference_mode", False):
                 # single-sample routing only (v0.1)
                 if logits.size(0) != 1:
                     raise RuntimeError(
@@ -125,49 +126,51 @@ class EarlyExitWrapper(nn.Module):
                 temp = max(self.config.temperature, 1e-6)
                 probs = torch.softmax(logits / temp, dim=-1)
                 confidence = probs.max().item()
-                threshold = self._inference_thresholds[exit_idx]
+                # read thresholds direct from config — the per-call copy was
+                # redundant
+                threshold = self.config.confidence_thresholds[exit_idx]
                 if confidence >= threshold:
                     raise _EarlyExitSignal(exit_idx, logits, confidence)
             else:
-                self._training_outputs.append(logits)
+                getattr(self._tls, "training_outputs", []).append(logits)
             return output
 
         return hook
 
     def _forward_training(self, x: torch.Tensor) -> list[torch.Tensor]:
-        self._training_outputs = []
-        self._inference_mode = False
-        feats = self.backbone(x)
-        final_logits = self._final_classifier(feats)
-        outputs = list(self._training_outputs) + [final_logits]
-        self._training_outputs = []
-        return outputs
-
-    def _forward_inference(self, x: torch.Tensor) -> InferenceResult:
-        self._inference_mode = True
-        self._inference_thresholds = list(self.config.confidence_thresholds)
+        self._tls.training_outputs = []
+        self._tls.inference_mode = False
         try:
             feats = self.backbone(x)
-        except _EarlyExitSignal as sig:
-            self._inference_mode = False
-            layer_name = self._exits[sig.exit_idx][2]
+            final_logits = self._final_classifier(feats)
+            return list(self._tls.training_outputs) + [final_logits]
+        finally:
+            self._tls.training_outputs = []
+
+    def _forward_inference(self, x: torch.Tensor) -> InferenceResult:
+        self._tls.inference_mode = True
+        try:
+            try:
+                feats = self.backbone(x)
+            except _EarlyExitSignal as sig:
+                layer_name = self._exits[sig.exit_idx][2]
+                return InferenceResult(
+                    prediction=sig.prediction,
+                    exit_taken=sig.exit_idx,
+                    confidence=sig.confidence,
+                    computation_used=self._flops_at[layer_name],
+                )
+            # no exit triggered — use final classifier (inside outer try so
+            # any exception still resets inference_mode)
+            final_logits = self._final_classifier(feats)
+            temp = max(self.config.temperature, 1e-6)
+            probs = torch.softmax(final_logits / temp, dim=-1)
+            confidence = probs.max().item()
             return InferenceResult(
-                prediction=sig.prediction,
-                exit_taken=sig.exit_idx,
-                confidence=sig.confidence,
-                computation_used=self._flops_at[layer_name],
+                prediction=final_logits,
+                exit_taken=-1,
+                confidence=confidence,
+                computation_used=1.0,
             )
         finally:
-            self._inference_mode = False
-
-        # no exit triggered — use final classifier
-        final_logits = self._final_classifier(feats)
-        temp = max(self.config.temperature, 1e-6)
-        probs = torch.softmax(final_logits / temp, dim=-1)
-        confidence = probs.max().item()
-        return InferenceResult(
-            prediction=final_logits,
-            exit_taken=-1,
-            confidence=confidence,
-            computation_used=1.0,
-        )
+            self._tls.inference_mode = False
