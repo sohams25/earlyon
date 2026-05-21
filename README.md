@@ -25,16 +25,16 @@ Trained on an RTX 4050 Laptop GPU (6 GB), starting from ImageNet pretrained
 weights and fine-tuning for 3-4 stage-1 epochs + 3-4 stage-2 epochs.
 Thresholds calibrated with a 1% target accuracy drop.
 
-| Model       | Test Acc | Baseline Acc | Avg FLOPs Used | % samples that exited early | Backbone p50 latency | Wrapper p50 latency* |
-|-------------|---------:|-------------:|---------------:|----------------------------:|---------------------:|---------------------:|
-| ResNet18    |   94.42% |       96.32% |         89.88% |                       35.3% |              1.32 ms |              0.51 ms |
-| ResNet50    |   95.88% |       97.60% |         81.42% |                       58.2% |              2.81 ms |              3.03 ms |
-| MobileNetV2 |   93.31% |       95.08% |         93.90% |                        8.5% |               TBD ms |               TBD ms |
+| Model       | Test Acc | Baseline Acc | Avg FLOPs Used | % samples that exited early |
+|-------------|---------:|-------------:|---------------:|----------------------------:|
+| ResNet18    |   94.42% |       96.32% |         89.88% |                       35.3% |
+| ResNet50    |   95.88% |       97.60% |         81.42% |                       58.2% |
+| MobileNetV2 |   93.31% |       95.08% |         93.90% |                        8.5% |
 
-*Wrapper latency measured with random-noise input, which can trigger
-spurious early exits in trained heads — treat as a best-case rather than a
-faithful production number. The honest signal is the **Avg FLOPs Used**
-column: this is what the wrapper actually skipped on real test images.
+The **Avg FLOPs Used** column is the honest signal: it measures the work
+actually skipped on real test images. Wall-clock latency depends on hardware
+and on whether your input distribution triggers spurious early exits; see
+the [latency appendix](#appendix-wall-clock-latency) below.
 
 ### per-exit distribution on the test set
 
@@ -165,6 +165,27 @@ earlyon analyze --model calibrated.pth
   is MIT)
 - fvcore for FLOPs accounting
 
+## appendix: wall-clock latency
+
+Throughput numbers reported here use a random-noise dummy input, which can
+trigger spurious early exits in trained heads. Treat these as a best-case
+upper bound rather than a faithful production number. The honest signal is
+**Avg FLOPs Used** in the headline table, which is measured on the real
+CIFAR-10 test set.
+
+Measured on RTX 4050 Laptop GPU (6 GB), batch size 1, 224x224 input,
+50-iteration warmup, 300 iterations measured.
+
+| Model       | Backbone p50 | Wrapper p50 (noise input) |
+|-------------|-------------:|--------------------------:|
+| ResNet18    |      1.32 ms |                   0.51 ms |
+| ResNet50    |      2.81 ms |                   3.03 ms |
+| MobileNetV2 |       TBD ms |                    TBD ms |
+
+Reproducible via `python scripts/re_evaluate.py` against the saved
+checkpoints from `scripts/run_benchmarks.py`. Raw per-run measurements
+in [`docs/benchmarks.json`](docs/benchmarks.json).
+
 ## license
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
