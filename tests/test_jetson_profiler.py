@@ -2,8 +2,6 @@
 absent so power/temp fields will be zero, but the harness must still execute
 end-to-end."""
 
-import torch
-
 from earlyon.benchmarking.jetson_profiler import (
     JetsonProfiler,
     TegrastatsMonitor,
@@ -13,7 +11,6 @@ from earlyon.core.exit_head import EarlyExitHead
 from earlyon.core.types import EarlyExitConfig, ExitPoint
 from earlyon.core.wrappers import EarlyExitWrapper
 from tests.fixtures.tiny_models import STAGE_CHANNELS, TinyBackbone
-
 
 SAMPLE_LINE = (
     "RAM 3456/7772MB SWAP 0/3886MB CPU [12%@1200,8%@1200,5%@1200,3%@1200] "
@@ -50,12 +47,12 @@ def test_profiler_runs_on_cpu_without_tegrastats():
     exits = [ExitPoint("e0", "stage1", STAGE_CHANNELS["stage1"])]
     heads = {ep.name: EarlyExitHead(ep.in_channels, 10) for ep in exits}
     cfg = EarlyExitConfig(
-        backbone="tiny", num_classes=10, exit_points=exits,
+        backbone="tiny",
+        num_classes=10,
+        exit_points=exits,
         confidence_thresholds=[0.8],
     )
-    wrapper = EarlyExitWrapper(
-        backbone, heads, lambda x: x, cfg, input_shape=(1, 3, 32, 32)
-    )
+    wrapper = EarlyExitWrapper(backbone, heads, lambda x: x, cfg, input_shape=(1, 3, 32, 32))
     profiler = JetsonProfiler()
     runs = profiler.profile(
         wrapper, input_shape=(1, 3, 32, 32), num_warmup=2, num_runs=5, device="cpu"

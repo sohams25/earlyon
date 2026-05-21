@@ -11,7 +11,7 @@ forgetting this causes exit-head accuracy to drift between runs.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Iterable
+from typing import Callable
 
 import torch
 import torch.nn as nn
@@ -103,9 +103,7 @@ def stage2_train_exits(
     for param in model.exit_parameters():
         param.requires_grad = True
 
-    optimizer = torch.optim.Adam(
-        model.exit_parameters(), lr=lr, weight_decay=weight_decay
-    )
+    optimizer = torch.optim.Adam(model.exit_parameters(), lr=lr, weight_decay=weight_decay)
 
     for epoch in range(epochs):
         # exit heads in train mode; backbone stays in eval
@@ -120,9 +118,7 @@ def stage2_train_exits(
             images = images.to(device)
             targets = targets.to(device)
             outputs = model(images, mode="training")
-            loss = weighted_multi_exit_loss(
-                outputs, targets, model.config.loss_weights
-            )
+            loss = weighted_multi_exit_loss(outputs, targets, model.config.loss_weights)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()

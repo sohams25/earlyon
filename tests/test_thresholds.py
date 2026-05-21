@@ -16,7 +16,9 @@ def _build():
     ]
     heads = {ep.name: EarlyExitHead(ep.in_channels, 10) for ep in exits}
     cfg = EarlyExitConfig(
-        backbone="tiny", num_classes=10, exit_points=exits,
+        backbone="tiny",
+        num_classes=10,
+        exit_points=exits,
         confidence_thresholds=[0.8, 0.8],
     )
     return EarlyExitWrapper(backbone, heads, lambda x: x, cfg, input_shape=(1, 3, 32, 32))

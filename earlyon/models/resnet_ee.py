@@ -37,8 +37,7 @@ def resnet50_ee(num_classes: int, pretrained: bool = True) -> EarlyExitWrapper:
         ExitPoint("e2", "layer3", _R50_CHANNELS["layer3"]),
     ]
     heads = {
-        ep.name: EarlyExitHead(ep.in_channels, num_classes, hidden_dim=256)
-        for ep in exit_points
+        ep.name: EarlyExitHead(ep.in_channels, num_classes, hidden_dim=256) for ep in exit_points
     }
     cfg = EarlyExitConfig(
         backbone="resnet50",
@@ -59,10 +58,7 @@ def resnet18_ee(num_classes: int, pretrained: bool = True) -> EarlyExitWrapper:
         ExitPoint("e0", "layer2", _R18_CHANNELS["layer2"]),
         ExitPoint("e1", "layer3", _R18_CHANNELS["layer3"]),
     ]
-    heads = {
-        ep.name: EarlyExitHead(ep.in_channels, num_classes)
-        for ep in exit_points
-    }
+    heads = {ep.name: EarlyExitHead(ep.in_channels, num_classes) for ep in exit_points}
     cfg = EarlyExitConfig(
         backbone="resnet18",
         num_classes=num_classes,

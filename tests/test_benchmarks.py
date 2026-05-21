@@ -21,9 +21,7 @@ def _build(thresholds=(1.0, 1.0)):
         exit_points=exits,
         confidence_thresholds=list(thresholds),
     )
-    wrapper = EarlyExitWrapper(
-        backbone, heads, lambda x: x, cfg, input_shape=(1, 3, 32, 32)
-    )
+    wrapper = EarlyExitWrapper(backbone, heads, lambda x: x, cfg, input_shape=(1, 3, 32, 32))
     return wrapper
 
 
@@ -51,16 +49,17 @@ def test_wrapper_overhead_on_real_model_is_modest():
     microseconds so any per-iter overhead dominates; this test only makes
     sense on a real model.)"""
     import pytest
+
     try:
         from earlyon.models import resnet18_ee
     except Exception:
         pytest.skip("torchvision not available")
     model = resnet18_ee(num_classes=10, pretrained=False)
     model.config.confidence_thresholds = [1.0, 1.0]  # no exit can fire
-    wrap_r = benchmark_wrapper(model, input_shape=(1, 3, 224, 224),
-                                num_warmup=10, num_runs=30)
-    bb_r = benchmark_backbone(model.backbone, input_shape=(1, 3, 224, 224),
-                               num_warmup=10, num_runs=30)
+    wrap_r = benchmark_wrapper(model, input_shape=(1, 3, 224, 224), num_warmup=10, num_runs=30)
+    bb_r = benchmark_backbone(
+        model.backbone, input_shape=(1, 3, 224, 224), num_warmup=10, num_runs=30
+    )
     overhead = (wrap_r.latency_median_ms - bb_r.latency_median_ms) / bb_r.latency_median_ms
     assert overhead < 0.25, f"hook overhead too high: {overhead:.1%}"
 

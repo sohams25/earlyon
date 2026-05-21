@@ -11,7 +11,6 @@ from torch.utils.data import DataLoader, Subset
 from earlyon.core.wrappers import EarlyExitWrapper
 from earlyon.models import mobilenetv2_ee, resnet18_ee, resnet50_ee
 
-
 FACTORIES = {
     "resnet18": resnet18_ee,
     "resnet50": resnet50_ee,
@@ -71,23 +70,25 @@ def cifar10_loaders(
 
     mean = (0.4914, 0.4822, 0.4465)
     std = (0.2470, 0.2435, 0.2616)
-    train_tf = transforms.Compose([
-        transforms.Resize(image_size),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean, std),
-    ])
-    eval_tf = transforms.Compose([
-        transforms.Resize(image_size),
-        transforms.ToTensor(),
-        transforms.Normalize(mean, std),
-    ])
+    train_tf = transforms.Compose(
+        [
+            transforms.Resize(image_size),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ]
+    )
+    eval_tf = transforms.Compose(
+        [
+            transforms.Resize(image_size),
+            transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ]
+    )
     train_full = torchvision.datasets.CIFAR10(
         root=root, train=True, download=True, transform=train_tf
     )
-    test = torchvision.datasets.CIFAR10(
-        root=root, train=False, download=True, transform=eval_tf
-    )
+    test = torchvision.datasets.CIFAR10(root=root, train=False, download=True, transform=eval_tf)
     n_val = int(len(train_full) * val_split)
     indices = list(range(len(train_full)))
     train_idx = indices[n_val:]
@@ -97,14 +98,24 @@ def cifar10_loaders(
         root=root, train=True, download=False, transform=eval_tf
     )
     train_loader = DataLoader(
-        Subset(train_full, train_idx), batch_size=batch_size,
-        shuffle=True, num_workers=num_workers, pin_memory=True,
+        Subset(train_full, train_idx),
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True,
     )
     val_loader = DataLoader(
-        Subset(val_full, val_idx), batch_size=1,
-        shuffle=False, num_workers=num_workers, pin_memory=True,
+        Subset(val_full, val_idx),
+        batch_size=1,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
     )
     test_loader = DataLoader(
-        test, batch_size=1, shuffle=False, num_workers=num_workers, pin_memory=True,
+        test,
+        batch_size=1,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
     )
     return train_loader, val_loader, test_loader

@@ -27,5 +27,6 @@ def test_uniform_logits_temperature_is_stable():
 
 def test_wrong_shape_raises():
     import pytest
+
     with pytest.raises(ValueError, match="logits must be 2D"):
         fit_temperature(torch.zeros(3, 4, 5), torch.zeros(3, dtype=torch.long))

@@ -33,8 +33,16 @@ def test_wrap_creates_checkpoint(tmp_path):
     out = tmp_path / "m.pth"
     result = runner.invoke(
         main,
-        ["wrap", "--backbone", "resnet18", "--num-classes", "10",
-         "--no-pretrained", "--output", str(out)],
+        [
+            "wrap",
+            "--backbone",
+            "resnet18",
+            "--num-classes",
+            "10",
+            "--no-pretrained",
+            "--output",
+            str(out),
+        ],
     )
     assert result.exit_code == 0, result.output
     assert out.exists()

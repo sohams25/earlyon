@@ -30,10 +30,7 @@ def mobilenetv2_ee(num_classes: int, pretrained: bool = True) -> EarlyExitWrappe
         ExitPoint("e0", "features.3", 24),
         ExitPoint("e1", "features.10", 64),
     ]
-    heads = {
-        ep.name: EarlyExitHead(ep.in_channels, num_classes)
-        for ep in exit_points
-    }
+    heads = {ep.name: EarlyExitHead(ep.in_channels, num_classes) for ep in exit_points}
     cfg = EarlyExitConfig(
         backbone="mobilenetv2",
         num_classes=num_classes,

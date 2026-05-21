@@ -64,8 +64,7 @@ def evaluate(
                 class_exits[class_key][key] += 1
 
     per_exit_acc = {
-        k: (exit_correct[k] / exit_counts[k]) if exit_counts[k] else 0.0
-        for k in exit_counts
+        k: (exit_correct[k] / exit_counts[k]) if exit_counts[k] else 0.0 for k in exit_counts
     }
     per_class_dist = {
         cls: {k: v / sum(counts.values()) for k, v in counts.items()}

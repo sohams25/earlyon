@@ -28,7 +28,9 @@ def _build_wrapper():
     ]
     heads = {ep.name: EarlyExitHead(ep.in_channels, 10) for ep in exits}
     cfg = EarlyExitConfig(
-        backbone="tiny", num_classes=10, exit_points=exits,
+        backbone="tiny",
+        num_classes=10,
+        exit_points=exits,
         confidence_thresholds=[0.8, 0.8],
     )
     return EarlyExitWrapper(backbone, heads, lambda x: x, cfg, input_shape=(1, 3, 32, 32))
@@ -52,7 +54,9 @@ def test_weighted_loss_length_mismatch_raises():
 def test_stage1_runs_one_epoch():
     bb = TinyBackbone(num_classes=10)
     loader = _toy_loader()
-    out = stage1_train_backbone(bb, loader, epochs=1, lr=0.01, device="cpu", on_epoch_end=lambda _: None)
+    out = stage1_train_backbone(
+        bb, loader, epochs=1, lr=0.01, device="cpu", on_epoch_end=lambda _: None
+    )
     assert out is bb
 
 
@@ -64,7 +68,9 @@ def test_stage2_does_not_update_backbone():
     bn_running_mean = wrapper.backbone.stage1[1].running_mean.detach().clone()
 
     loader = _toy_loader()
-    stage2_train_exits(wrapper, loader, epochs=1, lr=1e-2, device="cpu", on_epoch_end=lambda _: None)
+    stage2_train_exits(
+        wrapper, loader, epochs=1, lr=1e-2, device="cpu", on_epoch_end=lambda _: None
+    )
 
     new_param = wrapper.backbone.stage1[0].weight.detach()
     new_bn = wrapper.backbone.stage1[1].running_mean.detach()
@@ -76,6 +82,8 @@ def test_stage2_updates_exit_heads():
     wrapper = _build_wrapper()
     head_param_before = next(wrapper.exit_heads["e0"].parameters()).detach().clone()
     loader = _toy_loader()
-    stage2_train_exits(wrapper, loader, epochs=1, lr=1e-2, device="cpu", on_epoch_end=lambda _: None)
+    stage2_train_exits(
+        wrapper, loader, epochs=1, lr=1e-2, device="cpu", on_epoch_end=lambda _: None
+    )
     head_param_after = next(wrapper.exit_heads["e0"].parameters()).detach()
     assert not torch.equal(head_param_before, head_param_after), "exit head did not update"

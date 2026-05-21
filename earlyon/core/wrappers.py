@@ -9,7 +9,7 @@ short-circuit an opaque ``nn.Module.forward`` from inside a hook.
 from __future__ import annotations
 
 import threading
-from typing import Callable, Iterator, Optional
+from typing import Callable, Iterator
 
 import torch
 import torch.nn as nn
@@ -65,15 +65,11 @@ class EarlyExitWrapper(nn.Module):
         self.config = config
 
         # ordered list of (exit_idx, exit_name, layer_name)
-        self._exits = [
-            (i, ep.name, ep.layer_name) for i, ep in enumerate(config.exit_points)
-        ]
+        self._exits = [(i, ep.name, ep.layer_name) for i, ep in enumerate(config.exit_points)]
 
         # cumulative FLOPs fraction at each exit layer
         layer_names = [ep.layer_name for ep in config.exit_points]
-        self._flops_at: dict[str, float] = per_layer_flops(
-            backbone, layer_names, input_shape
-        )
+        self._flops_at: dict[str, float] = per_layer_flops(backbone, layer_names, input_shape)
 
         # per-thread caches: a single wrapper instance can be called from
         # multiple threads (DataParallel, inference servers). state lives in
@@ -106,9 +102,7 @@ class EarlyExitWrapper(nn.Module):
     def _register_hooks(self) -> None:
         for exit_idx, exit_name, layer_name in self._exits:
             module = self.backbone.get_submodule(layer_name)
-            handle = module.register_forward_hook(
-                self._make_hook(exit_idx, exit_name)
-            )
+            handle = module.register_forward_hook(self._make_hook(exit_idx, exit_name))
             self._hook_handles.append(handle)
 
     def _make_hook(self, exit_idx: int, exit_name: str):

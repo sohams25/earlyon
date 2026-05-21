@@ -19,9 +19,7 @@ def weighted_multi_exit_loss(
     final classifier (so ``len(predictions) == len(weights)``).
     """
     if len(predictions) != len(weights):
-        raise ValueError(
-            f"got {len(predictions)} predictions but {len(weights)} weights"
-        )
+        raise ValueError(f"got {len(predictions)} predictions but {len(weights)} weights")
     loss = predictions[0].new_zeros(())
     for pred, w in zip(predictions, weights):
         loss = loss + w * F.cross_entropy(pred, targets)

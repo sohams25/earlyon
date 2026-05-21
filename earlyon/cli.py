@@ -63,15 +63,25 @@ def train() -> None:
 @click.option("--device", default="auto")
 @click.option("--output", required=True, type=click.Path())
 def train_backbone(
-    backbone: str, num_classes: int, dataset: str, epochs: int,
-    lr: float, batch_size: int, device: str, output: str,
+    backbone: str,
+    num_classes: int,
+    dataset: str,
+    epochs: int,
+    lr: float,
+    batch_size: int,
+    device: str,
+    output: str,
 ) -> None:
     """Stage 1: train the backbone as a standard classifier."""
     dev = _device(device)
     train_loader, _, _ = cifar10_loaders(batch_size=batch_size)
     model = build_model(backbone, num_classes=num_classes, pretrained=True)
     stage1_train_backbone(
-        model.backbone, train_loader, epochs=epochs, lr=lr, device=dev,
+        model.backbone,
+        train_loader,
+        epochs=epochs,
+        lr=lr,
+        device=dev,
     )
     save_wrapper(model, output)
     click.echo(f"wrote {output}")
@@ -86,8 +96,13 @@ def train_backbone(
 @click.option("--device", default="auto")
 @click.option("--output", required=True, type=click.Path())
 def train_exits(
-    model_path: str, dataset: str, epochs: int, lr: float,
-    batch_size: int, device: str, output: str,
+    model_path: str,
+    dataset: str,
+    epochs: int,
+    lr: float,
+    batch_size: int,
+    device: str,
+    output: str,
 ) -> None:
     """Stage 2: freeze backbone, train exit heads."""
     dev = _device(device)
@@ -124,24 +139,42 @@ def calibrate(model_path: str, dataset: str, target_drop: float, device: str, ou
 @click.option("--warmup", default=50, type=int)
 @click.option("--input-size", default=224, type=int)
 @click.option("--json-out", default=None, type=click.Path())
-def benchmark(model_path: str, device: str, runs: int, warmup: int, input_size: int, json_out: str | None) -> None:
+def benchmark(
+    model_path: str, device: str, runs: int, warmup: int, input_size: int, json_out: str | None
+) -> None:
     """Throughput + latency benchmark, single-sample (batch=1)."""
     dev = _device(device)
     model = load_wrapper(model_path)
     shape = (1, 3, input_size, input_size)
-    wrap_r = benchmark_wrapper(model, input_shape=shape, device=dev, num_warmup=warmup, num_runs=runs)
-    bb_r = benchmark_backbone(model.backbone, input_shape=shape, device=dev, num_warmup=warmup, num_runs=runs)
+    wrap_r = benchmark_wrapper(
+        model, input_shape=shape, device=dev, num_warmup=warmup, num_runs=runs
+    )
+    bb_r = benchmark_backbone(
+        model.backbone, input_shape=shape, device=dev, num_warmup=warmup, num_runs=runs
+    )
     speedup = wrap_r.throughput_ips / max(bb_r.throughput_ips, 1e-9)
-    click.echo(json.dumps({
-        "device": dev,
-        "speedup": speedup,
-        "wrapper": wrap_r.to_dict(),
-        "backbone": bb_r.to_dict(),
-    }, indent=2))
+    click.echo(
+        json.dumps(
+            {
+                "device": dev,
+                "speedup": speedup,
+                "wrapper": wrap_r.to_dict(),
+                "backbone": bb_r.to_dict(),
+            },
+            indent=2,
+        )
+    )
     if json_out:
-        Path(json_out).write_text(json.dumps({
-            "speedup": speedup, "wrapper": wrap_r.to_dict(), "backbone": bb_r.to_dict(),
-        }, indent=2))
+        Path(json_out).write_text(
+            json.dumps(
+                {
+                    "speedup": speedup,
+                    "wrapper": wrap_r.to_dict(),
+                    "backbone": bb_r.to_dict(),
+                },
+                indent=2,
+            )
+        )
 
 
 @main.command()
@@ -156,20 +189,29 @@ def profile(model_path: str, runs: int, warmup: int, input_size: int, device: st
     model = load_wrapper(model_path)
     profiler = JetsonProfiler()
     runs_out = profiler.profile(
-        model, input_shape=(1, 3, input_size, input_size),
-        num_warmup=warmup, num_runs=runs, device=dev,
+        model,
+        input_shape=(1, 3, input_size, input_size),
+        num_warmup=warmup,
+        num_runs=runs,
+        device=dev,
     )
     import statistics
+
     lat = [r.latency_ms for r in runs_out]
     power = [r.power_mw for r in runs_out]
     temp = [r.temp_c for r in runs_out]
-    click.echo(json.dumps({
-        "runs": len(runs_out),
-        "latency_median_ms": statistics.median(lat),
-        "power_median_mw": statistics.median(power),
-        "temp_median_c": statistics.median(temp),
-        "tegrastats_available": profiler.monitor.available,
-    }, indent=2))
+    click.echo(
+        json.dumps(
+            {
+                "runs": len(runs_out),
+                "latency_median_ms": statistics.median(lat),
+                "power_median_mw": statistics.median(power),
+                "temp_median_c": statistics.median(temp),
+                "tegrastats_available": profiler.monitor.available,
+            },
+            indent=2,
+        )
+    )
 
 
 @main.command()
@@ -182,12 +224,17 @@ def analyze(model_path: str, dataset: str, device: str) -> None:
     _, _, test_loader = cifar10_loaders(batch_size=1)
     model = load_wrapper(model_path)
     report = evaluate(model, test_loader, device=dev)
-    click.echo(json.dumps({
-        "overall_accuracy": report.overall_accuracy,
-        "avg_computation_used": report.avg_computation_used,
-        "exit_distribution": report.exit_distribution,
-        "per_exit_accuracy": report.per_exit_accuracy,
-    }, indent=2))
+    click.echo(
+        json.dumps(
+            {
+                "overall_accuracy": report.overall_accuracy,
+                "avg_computation_used": report.avg_computation_used,
+                "exit_distribution": report.exit_distribution,
+                "per_exit_accuracy": report.per_exit_accuracy,
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":
