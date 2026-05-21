@@ -45,6 +45,25 @@ def load_wrapper(path: str | Path, pretrained_backbone: bool = False) -> EarlyEx
     payload = torch.load(Path(path), map_location="cpu", weights_only=True)
     cfg = payload["config"]
     model = build_model(cfg["backbone"], cfg["num_classes"], pretrained=pretrained_backbone)
+
+    # Validate config shape BEFORE mutating model.config. A checkpoint saved
+    # against a different exit count would otherwise leave model.config in a
+    # half-updated state if load_state_dict raised later.
+    n_exits = len(model.config.exit_points)
+    thr_len = len(cfg["confidence_thresholds"])
+    weight_len = len(cfg["loss_weights"])
+    if thr_len != n_exits:
+        raise ValueError(
+            f"checkpoint {Path(path).name}: confidence_thresholds has "
+            f"length {thr_len}, but backbone {cfg['backbone']!r} has "
+            f"{n_exits} exit points"
+        )
+    if weight_len != n_exits + 1:
+        raise ValueError(
+            f"checkpoint {Path(path).name}: loss_weights has length "
+            f"{weight_len}, expected {n_exits + 1} (one per exit plus final)"
+        )
+
     model.config.confidence_thresholds = list(cfg["confidence_thresholds"])
     model.config.loss_weights = list(cfg["loss_weights"])
     model.config.temperature = float(cfg["temperature"])

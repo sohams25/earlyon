@@ -72,3 +72,54 @@ def test_save_load_round_trip(tmp_path):
     assert loaded.config.temperature == 1.5
     loaded_first = next(iter(loaded.exit_heads["e0"].parameters()))
     assert torch.allclose(loaded_first, torch.full_like(loaded_first, 0.123))
+
+
+def test_load_wrapper_rejects_mismatched_threshold_count(tmp_path):
+    """Saved checkpoint with N+1 thresholds vs N-exit factory must raise
+    ValueError before mutating model.config."""
+    import torch
+    from earlyon.utils import build_model, load_wrapper
+
+    model = build_model("resnet18", num_classes=10, pretrained=False)
+    # resnet18 has 2 exit points; save a corrupted config with 3 thresholds
+    path = tmp_path / "bad.pth"
+    payload = {
+        "state_dict": model.state_dict(),
+        "config": {
+            "backbone": "resnet18",
+            "num_classes": 10,
+            "confidence_thresholds": [0.7, 0.8, 0.9],  # wrong length: should be 2
+            "loss_weights": [0.2, 0.3, 0.5],
+            "temperature": 1.0,
+        },
+    }
+    torch.save(payload, path)
+
+    import pytest
+
+    with pytest.raises(ValueError, match="confidence_thresholds has length 3"):
+        load_wrapper(path)
+
+
+def test_load_wrapper_rejects_mismatched_loss_weights(tmp_path):
+    import torch
+    from earlyon.utils import build_model, load_wrapper
+
+    model = build_model("resnet18", num_classes=10, pretrained=False)
+    path = tmp_path / "bad.pth"
+    payload = {
+        "state_dict": model.state_dict(),
+        "config": {
+            "backbone": "resnet18",
+            "num_classes": 10,
+            "confidence_thresholds": [0.7, 0.8],
+            "loss_weights": [0.5, 0.5],  # wrong length: should be 3
+            "temperature": 1.0,
+        },
+    }
+    torch.save(payload, path)
+
+    import pytest
+
+    with pytest.raises(ValueError, match="loss_weights has length 2"):
+        load_wrapper(path)
