@@ -41,9 +41,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/sohams-web/earlyon"
-Repository = "https://github.com/sohams-web/earlyon"
-Issues = "https://github.com/sohams-web/earlyon/issues"
+Homepage = "https://github.com/sohams25/earlyon"
+Repository = "https://github.com/sohams25/earlyon"
+Issues = "https://github.com/sohams25/earlyon/issues"
 
 [project.scripts]
 earlyon = "earlyon.cli:main"

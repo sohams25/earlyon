@@ -3,7 +3,7 @@
 ## quick start
 
 ```bash
-git clone https://github.com/sohams-web/earlyon.git
+git clone https://github.com/sohams25/earlyon.git
 cd earlyon
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
