@@ -87,3 +87,26 @@ def test_stage2_updates_exit_heads():
     )
     head_param_after = next(wrapper.exit_heads["e0"].parameters()).detach()
     assert not torch.equal(head_param_before, head_param_after), "exit head did not update"
+
+
+def test_stage2_log_carries_per_exit_accuracy():
+    """stage 2 must populate per_exit_accuracy and report a mean across all
+    outputs (not just exit_0)."""
+    wrapper = _build_wrapper()
+    loader = _toy_loader()
+    captured: list = []
+
+    def cb(log):
+        captured.append(log)
+
+    stage2_train_exits(wrapper, loader, epochs=1, lr=1e-2, device="cpu", on_epoch_end=cb)
+
+    assert len(captured) == 1
+    log = captured[0]
+    assert log.per_exit_accuracy is not None
+    n_exits = len(wrapper.config.exit_points)
+    # one entry per exit head plus one for the final classifier
+    assert set(log.per_exit_accuracy.keys()) == {f"exit_{i}" for i in range(n_exits)} | {"final"}
+    # log.accuracy is the mean across outputs
+    mean = sum(log.per_exit_accuracy.values()) / len(log.per_exit_accuracy)
+    assert abs(log.accuracy - mean) < 1e-9

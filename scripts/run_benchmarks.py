@@ -72,7 +72,8 @@ def run_one(backbone: str) -> dict:
         model, train_loader,
         epochs=cfg["stage2_epochs"], lr=1e-3, device=device,
         on_epoch_end=lambda l: print(
-            f"{log_prefix} s2 e{l.epoch}: loss={l.loss:.4f} acc={l.accuracy:.4f}",
+            f"{log_prefix} s2 e{l.epoch}: loss={l.loss:.4f} mean_acc={l.accuracy:.4f} "
+            f"per_exit={l.per_exit_accuracy}",
             flush=True,
         ),
     )
