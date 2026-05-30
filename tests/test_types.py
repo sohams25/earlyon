@@ -44,5 +44,28 @@ def test_unsupported_routing_policy_raises():
             backbone="tiny",
             num_classes=10,
             exit_points=_two_exits(),
+            routing_policy="budget",  # not implemented yet
+        )
+
+
+def test_entropy_routing_policy_accepted():
+    cfg = EarlyExitConfig(
+        backbone="tiny",
+        num_classes=10,
+        exit_points=_two_exits(),
+        routing_policy="entropy",
+    )
+    # entropy_thresholds default to a per-exit value matching exit count
+    assert len(cfg.entropy_thresholds) == 2
+    assert all(t > 0 for t in cfg.entropy_thresholds)
+
+
+def test_entropy_threshold_length_validated():
+    with pytest.raises(ValueError, match="entropy_thresholds"):
+        EarlyExitConfig(
+            backbone="tiny",
+            num_classes=10,
+            exit_points=_two_exits(),
             routing_policy="entropy",
+            entropy_thresholds=[0.5],  # should be length 2
         )

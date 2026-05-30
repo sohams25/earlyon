@@ -181,6 +181,77 @@ def test_batched_inference_empty_batch_raises():
         wrapper.forward_inference_batched(torch.zeros(0, 3, 32, 32))
 
 
+def _build_entropy(entropy_thresholds=(0.1, 0.1, 0.1)):
+    backbone = TinyBackbone(num_classes=10)
+    exits = [
+        ExitPoint("e0", "stage1", STAGE_CHANNELS["stage1"]),
+        ExitPoint("e1", "stage2", STAGE_CHANNELS["stage2"]),
+        ExitPoint("e2", "stage3", STAGE_CHANNELS["stage3"]),
+    ]
+    heads = {ep.name: EarlyExitHead(ep.in_channels, 10) for ep in exits}
+    cfg = EarlyExitConfig(
+        backbone="tiny",
+        num_classes=10,
+        exit_points=exits,
+        routing_policy="entropy",
+        entropy_thresholds=list(entropy_thresholds),
+    )
+    return EarlyExitWrapper(backbone, heads, lambda x: x, cfg, input_shape=(1, 3, 32, 32))
+
+
+def test_entropy_routing_exits_on_high_threshold():
+    """Wide entropy threshold (= accept high uncertainty) means even untrained
+    heads exit early. With threshold = log(10) ≈ 2.30 every distribution
+    qualifies and exit 0 fires."""
+    import math
+
+    wrapper = _build_entropy(entropy_thresholds=(math.log(10) + 0.01,) * 3)
+    wrapper.eval()
+    x = torch.randn(1, 3, 32, 32)
+    with torch.no_grad():
+        result = wrapper(x, mode="inference")
+    assert result.exit_taken == 0
+    assert result.computation_used < 1.0
+
+
+def test_entropy_routing_does_not_exit_on_tight_threshold():
+    """Threshold near zero rejects every realistic distribution → no exit fires."""
+    wrapper = _build_entropy(entropy_thresholds=(1e-6, 1e-6, 1e-6))
+    wrapper.eval()
+    x = torch.randn(1, 3, 32, 32)
+    with torch.no_grad():
+        result = wrapper(x, mode="inference")
+    assert result.exit_taken == -1
+    assert result.computation_used == 1.0
+
+
+def test_entropy_routing_preserves_inference_result_shape():
+    """Swapping routing policy must not change the InferenceResult contract."""
+    wrapper = _build_entropy(entropy_thresholds=(0.5, 0.5, 0.5))
+    wrapper.eval()
+    x = torch.randn(1, 3, 32, 32)
+    with torch.no_grad():
+        result = wrapper(x, mode="inference")
+    assert result.prediction.shape == (1, 10)
+    assert isinstance(result.exit_taken, int)
+    assert isinstance(result.confidence, float)
+    assert isinstance(result.computation_used, float)
+
+
+def test_entropy_routing_batched_inference():
+    """Batched routing must also work with entropy policy: all samples in a
+    batch exit together when every sample's entropy is below threshold."""
+    import math
+
+    wrapper = _build_entropy(entropy_thresholds=(math.log(10) + 0.01,) * 3)
+    wrapper.eval()
+    x = torch.randn(4, 3, 32, 32)
+    with torch.no_grad():
+        result = wrapper.forward_inference_batched(x)
+    assert result.exit_taken == 0
+    assert result.predictions.shape == (4, 10)
+
+
 def test_training_mode_on_fresh_thread_does_not_drop_outputs():
     """The threading.local must have its schema set before the hook fires.
     Without _init_tls, a fresh thread sees a missing training_outputs
