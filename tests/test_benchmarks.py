@@ -73,3 +73,52 @@ def test_evaluate_loop_runs():
     assert 0.0 <= report.overall_accuracy <= 1.0
     assert "exit_0" in report.exit_distribution
     assert abs(sum(report.exit_distribution.values()) - 1.0) < 1e-6
+
+
+def test_benchmark_wrapper_on_loader_returns_result():
+    """Real-data throughput: drive the wrapper on samples from a loader and
+    return the same BenchmarkResult shape as benchmark_wrapper. This is the
+    honest input-distribution signal the README appendix has been promising."""
+    from earlyon.benchmarking import benchmark_wrapper_on_loader
+
+    model = _build()
+    images = torch.randn(32, 3, 32, 32)
+    labels = torch.randint(0, 10, (32,))
+    loader = DataLoader(TensorDataset(images, labels), batch_size=1)
+
+    r = benchmark_wrapper_on_loader(model, loader, device="cpu", num_warmup=2, num_runs=16)
+    assert r.throughput_ips > 0
+    assert r.latency_median_ms > 0
+    assert r.latency_p95_ms >= r.latency_p50_ms
+    assert sum(r.exit_distribution.values()) == 1.0
+    assert 0.0 < r.avg_computation_used <= 1.0
+    assert r.num_runs == 16
+
+
+def test_benchmark_wrapper_on_loader_rejects_batched_loader():
+    """v0.2 inference is still batch-1; the helper must refuse a batched loader."""
+    from earlyon.benchmarking import benchmark_wrapper_on_loader
+
+    model = _build()
+    images = torch.randn(16, 3, 32, 32)
+    labels = torch.randint(0, 10, (16,))
+    loader = DataLoader(TensorDataset(images, labels), batch_size=4)
+
+    import pytest
+
+    with pytest.raises(ValueError, match="batch_size=1"):
+        benchmark_wrapper_on_loader(model, loader, device="cpu", num_warmup=1, num_runs=4)
+
+
+def test_benchmark_wrapper_on_loader_cycles_loader_when_short():
+    """If the loader has fewer samples than num_runs, it must cycle so the
+    measurement isn't truncated."""
+    from earlyon.benchmarking import benchmark_wrapper_on_loader
+
+    model = _build()
+    images = torch.randn(4, 3, 32, 32)
+    labels = torch.randint(0, 10, (4,))
+    loader = DataLoader(TensorDataset(images, labels), batch_size=1)
+
+    r = benchmark_wrapper_on_loader(model, loader, device="cpu", num_warmup=2, num_runs=20)
+    assert r.num_runs == 20
