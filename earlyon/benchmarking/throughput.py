@@ -2,6 +2,12 @@
 
 Single-sample inference benchmark (batch=1) per v0.1 routing constraint. Use
 ``num_warmup>=50`` on CUDA; GPU clocks need ~30 iterations to stabilize.
+
+``benchmark_wrapper`` runs a fixed random-noise input and is fast to
+reproduce; trained heads may fire spuriously on noise, so it's a best-case
+upper bound. ``benchmark_wrapper_on_loader`` drives real samples through the
+wrapper and is the honest input-distribution signal — see the v0.2 README
+appendix for the dual numbers.
 """
 
 from __future__ import annotations
@@ -12,6 +18,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 
 import torch
+from torch.utils.data import DataLoader
 
 from earlyon.core.wrappers import EarlyExitWrapper
 
@@ -77,6 +84,74 @@ def benchmark_wrapper(
         wall_total = time.perf_counter() - wall_start
 
     # exit_distribution keys: "exit_0", "exit_1", ..., "final"
+    def label(idx: int) -> str:
+        return "final" if idx == -1 else f"exit_{idx}"
+
+    dist = {label(k): v / num_runs for k, v in exits.items()}
+
+    return BenchmarkResult(
+        throughput_ips=num_runs / wall_total,
+        latency_median_ms=statistics.median(latencies) * 1000,
+        latency_p50_ms=_percentile(latencies, 0.50) * 1000,
+        latency_p95_ms=_percentile(latencies, 0.95) * 1000,
+        latency_p99_ms=_percentile(latencies, 0.99) * 1000,
+        avg_computation_used=sum(comp_used) / len(comp_used),
+        exit_distribution=dist,
+        num_runs=num_runs,
+        device=device,
+    )
+
+
+def benchmark_wrapper_on_loader(
+    model: EarlyExitWrapper,
+    loader: DataLoader,
+    device: str = "cpu",
+    num_warmup: int = 50,
+    num_runs: int = 500,
+) -> BenchmarkResult:
+    """Benchmark a wrapper in inference mode using real samples from a loader.
+
+    The loader must yield (image, label) batches with ``batch_size == 1`` to
+    match v0.2's single-sample routing. The first ``num_warmup`` samples are
+    discarded; the next ``num_runs`` are timed. The loader is cycled if it
+    runs out before ``num_warmup + num_runs`` samples have been drawn.
+    """
+    if loader.batch_size is None or loader.batch_size != 1:
+        raise ValueError(
+            f"benchmark_wrapper_on_loader requires loader.batch_size=1 "
+            f"(got {loader.batch_size}); v0.2 inference is single-sample"
+        )
+    model = model.to(device).eval()
+
+    def sample_stream():
+        while True:
+            for images, _targets in loader:
+                yield images.to(device)
+
+    stream = sample_stream()
+
+    with torch.no_grad():
+        for _ in range(num_warmup):
+            x = next(stream)
+            _ = model(x, mode="inference")
+    _sync(device)
+
+    latencies: list[float] = []
+    exits: Counter[int] = Counter()
+    comp_used: list[float] = []
+
+    with torch.no_grad():
+        wall_start = time.perf_counter()
+        for _ in range(num_runs):
+            x = next(stream)
+            t0 = time.perf_counter()
+            result = model(x, mode="inference")
+            _sync(device)
+            latencies.append(time.perf_counter() - t0)
+            exits[result.exit_taken] += 1
+            comp_used.append(result.computation_used)
+        wall_total = time.perf_counter() - wall_start
+
     def label(idx: int) -> str:
         return "final" if idx == -1 else f"exit_{idx}"
 

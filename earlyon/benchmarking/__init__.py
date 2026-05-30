@@ -4,11 +4,13 @@ from earlyon.benchmarking.throughput import (
     BenchmarkResult,
     benchmark_backbone,
     benchmark_wrapper,
+    benchmark_wrapper_on_loader,
 )
 
 __all__ = [
     "BenchmarkResult",
     "benchmark_wrapper",
+    "benchmark_wrapper_on_loader",
     "benchmark_backbone",
     "AccuracyReport",
     "evaluate",

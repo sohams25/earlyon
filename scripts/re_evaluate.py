@@ -14,7 +14,12 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from earlyon.benchmarking import benchmark_backbone, benchmark_wrapper, evaluate
+from earlyon.benchmarking import (
+    benchmark_backbone,
+    benchmark_wrapper,
+    benchmark_wrapper_on_loader,
+    evaluate,
+)
 from earlyon.utils import cifar10_loaders, load_wrapper
 
 OUT_JSON = ROOT / "docs" / "benchmarks.json"
@@ -39,8 +44,8 @@ def main():
         print(f"[{backbone}] test eval", flush=True)
         report = evaluate(model, test_loader, device=device)
 
-        # throughput bench
-        print(f"[{backbone}] throughput", flush=True)
+        # throughput bench — noise input (legacy upper bound)
+        print(f"[{backbone}] throughput (noise)", flush=True)
         shape = (1, 3, 224, 224)
         wrap_r = benchmark_wrapper(
             model, input_shape=shape, device=device, num_warmup=50, num_runs=300,
@@ -49,6 +54,13 @@ def main():
             model.backbone, input_shape=shape, device=device, num_warmup=50, num_runs=300,
         )
         speedup = wrap_r.throughput_ips / bb_r.throughput_ips
+
+        # throughput bench — real CIFAR-10 test samples (honest signal)
+        print(f"[{backbone}] throughput (real input)", flush=True)
+        real_r = benchmark_wrapper_on_loader(
+            model, test_loader, device=device, num_warmup=50, num_runs=300,
+        )
+        real_speedup = real_r.throughput_ips / bb_r.throughput_ips
 
         # merge into existing record
         existing = results.get(backbone, {})
@@ -61,15 +73,21 @@ def main():
             "test_exit_distribution": report.exit_distribution,
             "throughput_backbone_ips": round(bb_r.throughput_ips, 1),
             "throughput_wrapper_ips_noise_input": round(wrap_r.throughput_ips, 1),
+            "throughput_wrapper_ips_real_input": round(real_r.throughput_ips, 1),
             "throughput_speedup_noise_input": round(speedup, 3),
+            "throughput_speedup_real_input": round(real_speedup, 3),
             "latency_backbone_p50_ms": round(bb_r.latency_p50_ms, 3),
             "latency_wrapper_p50_ms_noise_input": round(wrap_r.latency_p50_ms, 3),
-            "note": "throughput uses random noise input which may trigger spurious exits in trained heads; test_avg_computation_used is the honest signal",
+            "latency_wrapper_p50_ms_real_input": round(real_r.latency_p50_ms, 3),
+            "real_input_avg_computation_used": round(real_r.avg_computation_used, 4),
+            "real_input_exit_distribution": real_r.exit_distribution,
+            "note": "noise-input numbers are best-case (trained heads fire spuriously on noise); real-input numbers are the honest input-distribution signal",
         })
         results[backbone] = existing
         OUT_JSON.write_text(json.dumps(results, indent=2))
         print(f"[{backbone}] acc={report.overall_accuracy:.4f} "
               f"avg_comp={report.avg_computation_used:.4f} "
+              f"real_speedup={real_speedup:.2f}x "
               f"dist={report.exit_distribution}", flush=True)
 
     print("all done")
