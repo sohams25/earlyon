@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import torch
@@ -23,13 +24,23 @@ class ExitPoint:
 @dataclass
 class EarlyExitConfig:
     """Per-model configuration. ``loss_weights`` includes the final classifier
-    at index -1, so its length is ``len(exit_points) + 1``."""
+    at index -1, so its length is ``len(exit_points) + 1``.
+
+    ``routing_policy`` selects how the wrapper decides whether to exit at an
+    intermediate head:
+
+    * ``"confidence"`` — exit when ``softmax(logits).max() >= threshold``.
+      Uses ``confidence_thresholds``.
+    * ``"entropy"`` — exit when ``H(softmax(logits)) <= threshold`` (low
+      entropy = high confidence). Uses ``entropy_thresholds``.
+    """
 
     backbone: str
     num_classes: int
     exit_points: list[ExitPoint]
     loss_weights: list[float] = field(default_factory=list)
     confidence_thresholds: list[float] = field(default_factory=list)
+    entropy_thresholds: list[float] = field(default_factory=list)
     routing_policy: str = "confidence"
     temperature: float = 1.0
 
@@ -41,6 +52,10 @@ class EarlyExitConfig:
             self.loss_weights = [w] * (n_exits + 1)
         if not self.confidence_thresholds:
             self.confidence_thresholds = [0.8] * n_exits
+        if not self.entropy_thresholds:
+            # half the max possible entropy for `num_classes`-way uniform
+            default = 0.5 * math.log(max(self.num_classes, 2))
+            self.entropy_thresholds = [default] * n_exits
         if len(self.loss_weights) != n_exits + 1:
             raise ValueError(
                 f"loss_weights must have length {n_exits + 1} (got {len(self.loss_weights)})"
@@ -50,10 +65,15 @@ class EarlyExitConfig:
                 f"confidence_thresholds must have length {n_exits} "
                 f"(got {len(self.confidence_thresholds)})"
             )
-        if self.routing_policy != "confidence":
+        if len(self.entropy_thresholds) != n_exits:
             raise ValueError(
-                f"routing_policy={self.routing_policy!r} not supported in v0.1 "
-                "(only 'confidence')"
+                f"entropy_thresholds must have length {n_exits} "
+                f"(got {len(self.entropy_thresholds)})"
+            )
+        if self.routing_policy not in {"confidence", "entropy"}:
+            raise ValueError(
+                f"routing_policy={self.routing_policy!r} not supported "
+                "(allowed: 'confidence', 'entropy')"
             )
 
 

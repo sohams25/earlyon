@@ -215,11 +215,19 @@ class EarlyExitWrapper(nn.Module):
 
             temp = max(self.config.temperature, 1e-6)
             probs = torch.softmax(logits / temp, dim=-1)
-            threshold = self.config.confidence_thresholds[exit_idx]
+            policy = self.config.routing_policy
 
             if getattr(self._tls, "batched_mode", False):
                 per_sample_conf = probs.max(dim=-1).values
-                if (per_sample_conf >= threshold).all():
+                if policy == "confidence":
+                    threshold = self.config.confidence_thresholds[exit_idx]
+                    fires = (per_sample_conf >= threshold).all()
+                else:  # entropy
+                    # per-sample entropy: -sum p log p (nats), clamp for log(0)
+                    entropy = -(probs * probs.clamp_min(1e-12).log()).sum(dim=-1)
+                    threshold = self.config.entropy_thresholds[exit_idx]
+                    fires = (entropy <= threshold).all()
+                if fires:
                     raise _EarlyExitSignal(
                         exit_idx,
                         logits,
@@ -234,8 +242,15 @@ class EarlyExitWrapper(nn.Module):
                         "forward_inference_batched(x) for batched routing"
                     )
                 confidence = float(probs.max())
-                if confidence >= threshold:
-                    raise _EarlyExitSignal(exit_idx, logits, confidence)
+                if policy == "confidence":
+                    threshold = self.config.confidence_thresholds[exit_idx]
+                    if confidence >= threshold:
+                        raise _EarlyExitSignal(exit_idx, logits, confidence)
+                else:  # entropy
+                    entropy = float(-(probs * probs.clamp_min(1e-12).log()).sum())
+                    threshold = self.config.entropy_thresholds[exit_idx]
+                    if entropy <= threshold:
+                        raise _EarlyExitSignal(exit_idx, logits, confidence)
             return output
 
         return hook
