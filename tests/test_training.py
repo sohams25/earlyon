@@ -7,6 +7,7 @@ from earlyon.core.exit_head import EarlyExitHead
 from earlyon.core.types import EarlyExitConfig, ExitPoint
 from earlyon.core.wrappers import EarlyExitWrapper
 from earlyon.training import (
+    joint_train_backbone_and_exits,
     stage1_train_backbone,
     stage2_train_exits,
     weighted_multi_exit_loss,
@@ -87,6 +88,55 @@ def test_stage2_updates_exit_heads():
     )
     head_param_after = next(wrapper.exit_heads["e0"].parameters()).detach()
     assert not torch.equal(head_param_before, head_param_after), "exit head did not update"
+
+
+def test_joint_trainer_updates_backbone_and_exits():
+    """Joint training updates backbone parameters AND exit-head parameters
+    in the same loop. Counterpart to two-stage, exposed for users who want
+    end-to-end gradient flow."""
+    wrapper = _build_wrapper()
+    bb_param_before = wrapper.backbone.stage1[0].weight.detach().clone()
+    head_param_before = next(wrapper.exit_heads["e0"].parameters()).detach().clone()
+
+    loader = _toy_loader()
+    joint_train_backbone_and_exits(
+        wrapper, loader, epochs=1, lr=1e-2, device="cpu", on_epoch_end=lambda _: None
+    )
+
+    bb_param_after = wrapper.backbone.stage1[0].weight.detach()
+    head_param_after = next(wrapper.exit_heads["e0"].parameters()).detach()
+    assert not torch.equal(bb_param_before, bb_param_after), "backbone did not update"
+    assert not torch.equal(head_param_before, head_param_after), "exit head did not update"
+
+
+def test_joint_trainer_does_not_freeze_batchnorm():
+    """Joint training keeps BN in train mode so running stats update — unlike
+    stage 2 which deliberately freezes them."""
+    wrapper = _build_wrapper()
+    bn_running_mean_before = wrapper.backbone.stage1[1].running_mean.detach().clone()
+    loader = _toy_loader()
+    joint_train_backbone_and_exits(
+        wrapper, loader, epochs=1, lr=1e-2, device="cpu", on_epoch_end=lambda _: None
+    )
+    bn_running_mean_after = wrapper.backbone.stage1[1].running_mean.detach()
+    assert not torch.equal(bn_running_mean_before, bn_running_mean_after), (
+        "BN running_mean did not update; backbone was unexpectedly frozen"
+    )
+
+
+def test_joint_trainer_log_reports_per_exit_accuracy():
+    wrapper = _build_wrapper()
+    loader = _toy_loader()
+    captured: list = []
+
+    joint_train_backbone_and_exits(
+        wrapper, loader, epochs=1, lr=1e-2, device="cpu", on_epoch_end=captured.append
+    )
+    assert len(captured) == 1
+    log = captured[0]
+    assert log.per_exit_accuracy is not None
+    n_exits = len(wrapper.config.exit_points)
+    assert set(log.per_exit_accuracy.keys()) == {f"exit_{i}" for i in range(n_exits)} | {"final"}
 
 
 def test_stage2_log_carries_per_exit_accuracy():
