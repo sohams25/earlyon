@@ -16,7 +16,11 @@ from earlyon.benchmarking import (
     evaluate,
 )
 from earlyon.core.thresholds import calibrate_thresholds
-from earlyon.training import stage1_train_backbone, stage2_train_exits
+from earlyon.training import (
+    joint_train_backbone_and_exits,
+    stage1_train_backbone,
+    stage2_train_exits,
+)
 from earlyon.utils import build_model, cifar10_loaders, load_wrapper, save_wrapper
 
 BACKBONES = ["resnet18", "resnet50", "mobilenetv2", "efficientnet_b0"]
@@ -109,6 +113,34 @@ def train_exits(
     train_loader, _, _ = cifar10_loaders(batch_size=batch_size)
     model = load_wrapper(model_path)
     stage2_train_exits(model, train_loader, epochs=epochs, lr=lr, device=dev)
+    save_wrapper(model, output)
+    click.echo(f"wrote {output}")
+
+
+@train.command("joint")
+@click.option("--model", "model_path", required=True, type=click.Path(exists=True))
+@click.option("--dataset", default="cifar10", type=click.Choice(["cifar10"]))
+@click.option("--epochs", default=30, type=int)
+@click.option("--lr", default=1e-2, type=float)
+@click.option("--batch-size", default=128, type=int)
+@click.option("--device", default="auto")
+@click.option("--output", required=True, type=click.Path())
+def train_joint(
+    model_path: str,
+    dataset: str,
+    epochs: int,
+    lr: float,
+    batch_size: int,
+    device: str,
+    output: str,
+) -> None:
+    """Joint training: backbone and exit heads update together."""
+    dev = _device(device)
+    train_loader, _, _ = cifar10_loaders(batch_size=batch_size)
+    model = load_wrapper(model_path)
+    joint_train_backbone_and_exits(
+        model, train_loader, epochs=epochs, lr=lr, device=dev
+    )
     save_wrapper(model, output)
     click.echo(f"wrote {output}")
 
