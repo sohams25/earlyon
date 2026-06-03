@@ -20,11 +20,11 @@ Cron tag: `earlyon-backlog-cron-v1`
 
 ## tier 2 — medium effort (cron-eligible, code-reviewer invoked)
 
-- [ ] **real-data throughput bench**: in `earlyon/benchmarking/throughput.py`, add a `benchmark_wrapper_on_loader` function that takes a DataLoader and runs the bench on real samples instead of random noise. Update `scripts/re_evaluate.py` to use it. Document the new metric in README.
-- [ ] **entropy routing policy**: add `routing_policy="entropy"` support. The hook computes entropy on softmax; if entropy < threshold, exit. Add to `EarlyExitConfig` validation. Tests + docs.
-- [ ] **joint trainer**: implement `JointTrainer` in `earlyon/training/joint_trainer.py` for users who want backbone+exits trained simultaneously. Counterpart to `TwoStageTrainer`. Tests.
-- [ ] **cifar-native resnet variant**: add `cifar_resnet_ee` in `earlyon/models/` — small ResNet (~11M params) designed for 32x32 input, no upsampling needed. Tests + a benchmark entry in scripts.
-- [ ] **fit_temperature integration**: wire `fit_temperature` into `calibrate_thresholds` as an opt-in `fit_temperature: bool = False` argument. When true, fit a temperature on the val set before threshold search.
+- [x] **real-data throughput bench**: in `earlyon/benchmarking/throughput.py`, add a `benchmark_wrapper_on_loader` function that takes a DataLoader and runs the bench on real samples instead of random noise. Update `scripts/re_evaluate.py` to use it. Document the new metric in README.
+- [x] **entropy routing policy**: add `routing_policy="entropy"` support. The hook computes entropy on softmax; if entropy < threshold, exit. Add to `EarlyExitConfig` validation. Tests + docs.
+- [x] **joint trainer**: implement `JointTrainer` in `earlyon/training/joint_trainer.py` for users who want backbone+exits trained simultaneously. Counterpart to `TwoStageTrainer`. Tests.
+- [x] **cifar-native resnet variant**: add `cifar_resnet_ee` in `earlyon/models/` — small ResNet (~11M params) designed for 32x32 input, no upsampling needed. Tests + a benchmark entry in scripts.
+- [x] **fit_temperature integration**: wire `fit_temperature` into `calibrate_thresholds` as an opt-in `fit_temperature: bool = False` argument. When true, fit a temperature on the val set before threshold search.
 
 ## tier 3 — large (manual only, cron must skip)
 
