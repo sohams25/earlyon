@@ -498,27 +498,31 @@ cat:         [18%, 32%, 28%, 22%] → goes deep (ambiguous)
 
 ```bash
 # Wrap a pretrained model with early exits
-earlyon create --backbone resnet50 --num-classes 10 --exits 3 --output model.py
+earlyon wrap --backbone resnet50 --num-classes 10 --output model.pth
 
 # Two-stage training
-earlyon train backbone --model model.py --dataset cifar10 --epochs 90
-earlyon train exits --model model.py --dataset cifar10 --epochs 20
+earlyon train backbone --backbone resnet50 --num-classes 10 \
+    --dataset cifar10 --epochs 90 --output backbone.pth
+earlyon train exits --model backbone.pth --dataset cifar10 --epochs 20 --output ee.pth
+
+# Joint training (alternative to two-stage)
+earlyon train joint --model backbone.pth --dataset cifar10 --epochs 30 --output joint.pth
 
 # Calibrate thresholds
-earlyon calibrate --model checkpoint.pth --dataset cifar10 --target-drop 0.01
+earlyon calibrate --model ee.pth --target-drop 0.01 --output calibrated.pth
 
 # Benchmark
-earlyon benchmark --model checkpoint.pth --dataset cifar10 --device cuda
+earlyon benchmark --model calibrated.pth --device cuda
 
 # Jetson profile
-earlyon profile --model checkpoint.pth --dataset cifar10 --device jetson
+earlyon profile --model calibrated.pth
 
-# Export to ONNX
-earlyon export --model checkpoint.pth --output model.onnx --dynamic-batch
-
-# Exit distribution analysis
-earlyon analyze exits --model checkpoint.pth --dataset cifar10
+# Exit distribution + per-exit accuracy analysis
+earlyon analyze --model calibrated.pth --dataset cifar10
 ```
+
+> ONNX export is not yet implemented (`earlyon/onnx.py` raises
+> `NotImplementedError`); there is no `earlyon export` command.
 
 ---
 

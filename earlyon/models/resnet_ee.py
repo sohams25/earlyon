@@ -10,6 +10,7 @@ is identity.
 
 from __future__ import annotations
 
+import torch
 import torch.nn as nn
 from torchvision.models import resnet18, resnet50
 
@@ -22,7 +23,7 @@ _R18_CHANNELS = {"layer1": 64, "layer2": 128, "layer3": 256, "layer4": 512}
 _R50_CHANNELS = {"layer1": 256, "layer2": 512, "layer3": 1024, "layer4": 2048}
 
 
-def _identity(x):
+def _identity(x: torch.Tensor) -> torch.Tensor:
     return x
 
 

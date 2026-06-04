@@ -64,7 +64,7 @@ class TegrastatsMonitor:
     def __init__(self, interval_ms: int = 100, max_samples: int = 256) -> None:
         self.interval_ms = interval_ms
         self._samples: deque[JetsonSample] = deque(maxlen=max_samples)
-        self._proc: Optional[subprocess.Popen] = None
+        self._proc: Optional[subprocess.Popen[str]] = None
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self.available = shutil.which("tegrastats") is not None

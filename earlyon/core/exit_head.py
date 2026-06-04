@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import torch
 import torch.nn as nn
 
@@ -33,4 +35,6 @@ class EarlyExitHead(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.pool(x)
         x = self.flatten(x)
-        return self.classifier(x)
+        # nn.Sequential.__call__ is typed -> Any in the torch stubs; the runtime
+        # value is always a Tensor.
+        return cast(torch.Tensor, self.classifier(x))

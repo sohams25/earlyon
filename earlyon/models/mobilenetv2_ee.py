@@ -7,6 +7,7 @@ inverted-residual blocks, accessed via dotted paths ``features.3`` and
 
 from __future__ import annotations
 
+import torch
 import torch.nn as nn
 from torchvision.models import mobilenet_v2
 
@@ -15,7 +16,7 @@ from earlyon.core.types import EarlyExitConfig, ExitPoint
 from earlyon.core.wrappers import EarlyExitWrapper
 
 
-def _identity(x):
+def _identity(x: torch.Tensor) -> torch.Tensor:
     return x
 
 

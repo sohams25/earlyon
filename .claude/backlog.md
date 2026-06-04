@@ -14,9 +14,9 @@ Cron tag: `earlyon-backlog-cron-v1`
 - [x] **readme latency footnote move**: move the wrapper-latency column out of the headline results table into a footnote/appendix in `README.md`. The headline table should only show: test acc, baseline acc, avg flops used, % samples exiting early.
 - [x] **default_log print comment**: in `earlyon/training/two_stage_trainer.py:_default_log`, add a one-line comment explaining that `print()` is intentional for a user-facing CLI default callback.
 - [ ] **code of conduct**: add `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1) at repo root.
-- [ ] **security policy**: add `SECURITY.md` at repo root with a simple disclosure address.
-- [ ] **github labels**: create labels `bug`, `enhancement`, `good-first-issue`, `v0.2`, `documentation`, `help-wanted` via `gh label create`. Idempotent (skip if exists).
-- [ ] **coverage badge**: run `pytest --cov=earlyon --cov-report=term`, capture the percentage, add a coverage badge to the README pointing at a static value (no codecov dependency).
+- [x] **security policy**: add `SECURITY.md` at repo root with a simple disclosure address.
+- [x] **github labels**: create labels `bug`, `enhancement`, `good-first-issue`, `v0.2`, `documentation`, `help-wanted` via `gh label create`. Idempotent (skip if exists).
+- [x] **coverage badge**: run `pytest --cov=earlyon --cov-report=term`, capture the percentage, add a coverage badge to the README pointing at a static value (no codecov dependency).
 
 ## tier 2 — medium effort (cron-eligible, code-reviewer invoked)
 

@@ -17,6 +17,13 @@ def weighted_multi_exit_loss(
 
     ``predictions`` contains one logits tensor per exit head plus one for the
     final classifier (so ``len(predictions) == len(weights)``).
+
+    Weights are applied as-is; the loss is **not** normalized. If they do not
+    sum to 1.0 the loss magnitude scales accordingly — under plain SGD this
+    scales the effective learning rate, while under Adam (the default stage-2
+    exit optimizer) a uniform rescale largely cancels. The built-in model
+    configs and ``EarlyExitConfig`` defaults already sum to 1.0; normalize your
+    own weights externally if you need scale-stable behavior across optimizers.
     """
     if len(predictions) != len(weights):
         raise ValueError(f"got {len(predictions)} predictions but {len(weights)} weights")

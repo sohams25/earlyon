@@ -35,6 +35,16 @@ def test_throughput_result_is_well_formed():
     assert 0.0 < r.avg_computation_used <= 1.0
 
 
+def test_benchmark_wrapper_rejects_batched_input_shape():
+    """benchmark_wrapper drives single-sample inference; a batched input_shape
+    must be rejected up front rather than fail deep in routing."""
+    import pytest
+
+    model = _build()
+    with pytest.raises(ValueError, match="batch_size=1"):
+        benchmark_wrapper(model, input_shape=(2, 3, 32, 32), num_warmup=1, num_runs=2)
+
+
 def test_backbone_baseline_runs():
     model = _build()
     r = benchmark_backbone(model.backbone, input_shape=(1, 3, 32, 32), num_warmup=2, num_runs=10)

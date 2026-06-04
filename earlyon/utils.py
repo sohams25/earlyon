@@ -9,7 +9,16 @@ import torch
 from torch.utils.data import DataLoader, Subset
 
 from earlyon.core.wrappers import EarlyExitWrapper
-from earlyon.models import efficientnet_b0_ee, mobilenetv2_ee, resnet18_ee, resnet50_ee
+from earlyon.models import (
+    cifar_resnet_ee,
+    efficientnet_b0_ee,
+    mobilenetv2_ee,
+    resnet18_ee,
+    resnet50_ee,
+)
+
+_Batch = tuple[torch.Tensor, torch.Tensor]
+_CIFAR_PREFIX = "cifar_resnet"
 
 FACTORIES = {
     "resnet18": resnet18_ee,
@@ -20,19 +29,38 @@ FACTORIES = {
 
 
 def build_model(backbone: str, num_classes: int, pretrained: bool = True) -> EarlyExitWrapper:
+    # cifar_resnet_ee records its depth in the backbone string (e.g.
+    # "cifar_resnet20"); reconstruct the architecture from that so save/load
+    # round-trips. Without this, any cifar_resnet checkpoint is unloadable.
+    if backbone.startswith(_CIFAR_PREFIX):
+        suffix = backbone[len(_CIFAR_PREFIX) :]
+        if not suffix.isdigit():
+            raise ValueError(
+                f"malformed cifar_resnet backbone {backbone!r}; expected e.g. 'cifar_resnet20'"
+            )
+        return cifar_resnet_ee(num_classes=num_classes, depth=int(suffix))
     if backbone not in FACTORIES:
-        raise ValueError(f"unknown backbone {backbone!r}; choose from {list(FACTORIES)}")
+        raise ValueError(
+            f"unknown backbone {backbone!r}; choose from {list(FACTORIES)} or 'cifar_resnet<depth>'"
+        )
     return FACTORIES[backbone](num_classes=num_classes, pretrained=pretrained)
 
 
 def save_wrapper(model: EarlyExitWrapper, path: str | Path) -> None:
-    """Save state_dict + config. Config is needed to rebuild the wrapper."""
+    """Save state_dict + config. Config is needed to rebuild the wrapper.
+
+    ``routing_policy`` and ``entropy_thresholds`` are persisted too: without
+    them an entropy-routed model would silently reload as confidence-routed
+    (the wrapper default), discarding the calibrated entropy thresholds.
+    """
     payload = {
         "state_dict": model.state_dict(),
         "config": {
             "backbone": model.config.backbone,
             "num_classes": model.config.num_classes,
+            "routing_policy": model.config.routing_policy,
             "confidence_thresholds": list(model.config.confidence_thresholds),
+            "entropy_thresholds": list(model.config.entropy_thresholds),
             "loss_weights": list(model.config.loss_weights),
             "temperature": model.config.temperature,
         },
@@ -63,10 +91,37 @@ def load_wrapper(path: str | Path, pretrained_backbone: bool = False) -> EarlyEx
             f"checkpoint {Path(path).name}: loss_weights has length "
             f"{weight_len}, expected {n_exits + 1} (one per exit plus final)"
         )
+    # entropy_thresholds + routing_policy are optional for back-compat with
+    # pre-0.2 checkpoints; validate them only when present. load_wrapper
+    # bypasses EarlyExitConfig.__post_init__, so re-validate the persisted policy
+    # here — otherwise a corrupted checkpoint would silently mis-route.
+    if "entropy_thresholds" in cfg and len(cfg["entropy_thresholds"]) != n_exits:
+        raise ValueError(
+            f"checkpoint {Path(path).name}: entropy_thresholds has length "
+            f"{len(cfg['entropy_thresholds'])}, but backbone {cfg['backbone']!r} "
+            f"has {n_exits} exit points"
+        )
+    policy = cfg.get("routing_policy", model.config.routing_policy)
+    if policy not in {"confidence", "entropy"}:
+        raise ValueError(
+            f"checkpoint {Path(path).name}: unsupported routing_policy {policy!r} "
+            "(allowed: 'confidence', 'entropy')"
+        )
+    if policy == "entropy" and "entropy_thresholds" not in cfg:
+        raise ValueError(
+            f"checkpoint {Path(path).name}: routing_policy='entropy' but no "
+            "entropy_thresholds were persisted — the model would silently route "
+            "on uncalibrated defaults"
+        )
 
     model.config.confidence_thresholds = list(cfg["confidence_thresholds"])
     model.config.loss_weights = list(cfg["loss_weights"])
     model.config.temperature = float(cfg["temperature"])
+    # back-compat: older checkpoints predate these fields; keep the fresh
+    # model's defaults when the key is absent.
+    model.config.routing_policy = policy
+    if "entropy_thresholds" in cfg:
+        model.config.entropy_thresholds = list(cfg["entropy_thresholds"])
     model.load_state_dict(payload["state_dict"])
     return model
 
@@ -77,7 +132,7 @@ def cifar10_loaders(
     image_size: int = 224,
     num_workers: int = 2,
     val_split: float = 0.1,
-) -> Tuple[DataLoader, DataLoader, DataLoader]:
+) -> Tuple[DataLoader[_Batch], DataLoader[_Batch], DataLoader[_Batch]]:
     """Return (train, val, test) DataLoaders for CIFAR-10.
 
     Images are upsampled to ``image_size`` so torchvision ImageNet-pretrained

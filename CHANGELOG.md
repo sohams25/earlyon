@@ -4,6 +4,58 @@ format follows [keep a changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## unreleased
 
+## 0.2.0 - 2026-06-04
+
+### added
+- entropy routing policy (`routing_policy="entropy"`): exit when softmax entropy
+  falls below a per-exit threshold, alongside the existing confidence policy
+- `joint_train_backbone_and_exits` + `earlyon train joint` CLI: train backbone
+  and exit heads together as an alternative to two-stage training
+- `cifar_resnet_ee` — CIFAR-native ResNet (He et al. 2015, 6n+2 depth) for 32x32
+  input without upsampling
+- `efficientnet_b0_ee` backbone factory and `--backbone efficientnet_b0` CLI option
+- `forward_inference_batched` — conservative per-batch routing (all samples in a
+  batch exit together at the earliest layer every sample clears)
+- `benchmark_wrapper_on_loader` — real-data throughput on samples from a
+  DataLoader, the honest input-distribution signal vs. random-noise input
+- `fit_temperature` opt-in in `calibrate_thresholds` (post-hoc temperature
+  scaling fit before the threshold search)
+- `@pytest.mark.gpu` test suite covering CUDA device placement, the benchmark
+  sync path, and the on-device BatchNorm-freeze invariant
+- `SECURITY.md` with a private vulnerability-disclosure policy
+
+### fixed
+- inference path now runs under `torch.inference_mode()`: `model(x,
+  mode="inference")` no longer retains an autograd graph on the returned
+  prediction (server memory growth) and no longer emits a requires-grad-to-scalar
+  warning, even when the caller forgets `no_grad`
+- `calibrate_thresholds` is now routing-policy-aware: calibrating an
+  entropy-routed model writes `entropy_thresholds` (the field the router reads)
+  instead of being a silent no-op, and respects entropy's inverted monotonicity
+- `fit_temperature` iterates LBFGS to convergence (was a single underfitting
+  step) and rejects non-finite logits / falls back to T=1.0 on divergence so a
+  NaN can no longer poison every downstream softmax
+- `save_wrapper`/`load_wrapper` now persist `routing_policy` and
+  `entropy_thresholds`; an entropy-routed checkpoint no longer reloads as
+  confidence-routed. Pre-0.2 checkpoints still load (fields default), and load
+  re-validates the policy (rejecting an unknown policy or entropy-without-thresholds)
+- `cifar_resnet_ee` checkpoints now round-trip: `build_model` reconstructs the
+  CIFAR-native ResNet from its depth-encoded backbone string (was unloadable)
+- calibration uses strictly non-firing search seeds, so a float32-saturated
+  softmax can no longer fire at the no-exit baseline and corrupt the threshold
+  search (affects both confidence and entropy policies)
+- `per_layer_flops` restores the backbone's train/eval mode after the FLOPs
+  probe instead of silently leaving it in eval at wrapper construction
+- `benchmark_wrapper_on_loader` rejects an empty loader instead of spinning forever
+- the inference temperature guard tolerates a non-finite `config.temperature`
+  (falls back to 1.0) instead of producing all-NaN softmax probabilities
+
+### changed
+- `mypy --strict` is clean (0 errors) and enforced in CI; `isort --check` added
+  to CI. Full lint/type/test gate now blocks merges
+- trainers warn when a `val_loader` is passed (accepted but not yet used)
+- Development Status classifier moved from Alpha to Beta
+
 ## 0.1.0 - 2026-05-21
 
 initial release.

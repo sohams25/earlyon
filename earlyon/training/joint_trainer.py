@@ -15,18 +15,23 @@ Difference from stage 2:
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from earlyon.core.wrappers import EarlyExitWrapper
 from earlyon.training.losses import weighted_multi_exit_loss
-from earlyon.training.two_stage_trainer import LogFn, TrainStepLog, _default_log
+from earlyon.training.two_stage_trainer import (
+    LogFn,
+    TrainStepLog,
+    _Batch,
+    _default_log,
+    _warn_if_val_loader_unused,
+)
 
 
 def joint_train_backbone_and_exits(
     model: EarlyExitWrapper,
-    train_loader: DataLoader,
-    val_loader: DataLoader | None = None,
+    train_loader: DataLoader[_Batch],
+    val_loader: DataLoader[_Batch] | None = None,
     epochs: int = 30,
     lr: float = 1e-2,
     momentum: float = 0.9,
@@ -40,7 +45,11 @@ def joint_train_backbone_and_exits(
     Pass ``optimizer`` to override the default SGD; the default takes every
     parameter of ``model`` (backbone + exit heads) so callers don't accidentally
     freeze the backbone the way two-stage training does.
+
+    ``val_loader`` is accepted but not yet used (see
+    :func:`earlyon.training.two_stage_trainer._warn_if_val_loader_unused`).
     """
+    _warn_if_val_loader_unused(val_loader)
     model = model.to(device)
 
     # explicitly enable grads on backbone — defensive: users who previously
@@ -76,7 +85,7 @@ def joint_train_backbone_and_exits(
             outputs = model(images, mode="training")
             loss = weighted_multi_exit_loss(outputs, targets, model.config.loss_weights)
             optimizer.zero_grad()
-            loss.backward()
+            loss.backward()  # type: ignore[no-untyped-call]  # torch stub gap
             optimizer.step()
 
             running_loss += loss.item() * images.size(0)

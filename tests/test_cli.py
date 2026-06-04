@@ -26,6 +26,7 @@ def test_train_subcommands_exist():
     assert result.exit_code == 0
     assert "backbone" in result.output
     assert "exits" in result.output
+    assert "joint" in result.output
 
 
 def test_wrap_creates_checkpoint(tmp_path):
@@ -74,10 +75,142 @@ def test_save_load_round_trip(tmp_path):
     assert torch.allclose(loaded_first, torch.full_like(loaded_first, 0.123))
 
 
+def test_save_load_round_trip_preserves_entropy_routing(tmp_path):
+    """Regression: an entropy-routed model must reload as entropy-routed with its
+    calibrated entropy_thresholds intact. Before persisting these fields, reload
+    silently reverted to confidence routing and dropped the entropy thresholds."""
+    from earlyon.utils import build_model, load_wrapper, save_wrapper
+
+    model = build_model("resnet18", num_classes=10, pretrained=False)
+    model.config.routing_policy = "entropy"
+    model.config.entropy_thresholds = [0.3, 0.6]
+    model.config.confidence_thresholds = [0.85, 0.80]
+
+    path = tmp_path / "ent.pth"
+    save_wrapper(model, path)
+    loaded = load_wrapper(path)
+
+    assert loaded.config.routing_policy == "entropy"
+    assert loaded.config.entropy_thresholds == [0.3, 0.6]
+    assert loaded.config.confidence_thresholds == [0.85, 0.80]
+
+
+def test_load_wrapper_back_compat_without_entropy_fields(tmp_path):
+    """Pre-0.2 checkpoints have no routing_policy/entropy_thresholds keys; load
+    must not raise and must fall back to the fresh model's defaults."""
+    import torch
+
+    from earlyon.utils import build_model, load_wrapper
+
+    model = build_model("resnet18", num_classes=10, pretrained=False)
+    path = tmp_path / "old.pth"
+    payload = {
+        "state_dict": model.state_dict(),
+        "config": {
+            "backbone": "resnet18",
+            "num_classes": 10,
+            "confidence_thresholds": [0.7, 0.8],
+            "loss_weights": [0.2, 0.3, 0.5],
+            "temperature": 1.0,
+            # no routing_policy / entropy_thresholds (pre-0.2)
+        },
+    }
+    torch.save(payload, path)
+
+    loaded = load_wrapper(path)  # must not raise
+    assert loaded.config.routing_policy == "confidence"
+    assert len(loaded.config.entropy_thresholds) == 2
+
+
+def test_save_load_round_trip_cifar_resnet(tmp_path):
+    """Regression: cifar_resnet_ee records its depth in the backbone string
+    ('cifar_resnet20'); build_model must reconstruct it so the checkpoint loads.
+    Previously any cifar_resnet checkpoint raised 'unknown backbone'."""
+    from earlyon.models import cifar_resnet_ee
+    from earlyon.utils import load_wrapper, save_wrapper
+
+    model = cifar_resnet_ee(num_classes=10, depth=20)
+    n_exits = len(model.config.exit_points)
+    model.config.confidence_thresholds = [0.7] * n_exits
+
+    path = tmp_path / "cifar.pth"
+    save_wrapper(model, path)
+    loaded = load_wrapper(path)  # must not raise
+
+    assert loaded.config.backbone == "cifar_resnet20"
+    assert loaded.config.confidence_thresholds == [0.7] * n_exits
+    assert len(loaded.config.exit_points) == n_exits
+
+
+def test_build_model_rejects_malformed_cifar_backbone():
+    import pytest
+
+    from earlyon.utils import build_model
+
+    with pytest.raises(ValueError, match="malformed cifar_resnet"):
+        build_model("cifar_resnetXYZ", num_classes=10)
+
+
+def test_load_wrapper_rejects_entropy_policy_without_thresholds(tmp_path):
+    """A checkpoint claiming entropy routing but missing entropy_thresholds must
+    raise rather than silently route on uncalibrated defaults."""
+    import pytest
+    import torch
+
+    from earlyon.utils import build_model, load_wrapper
+
+    model = build_model("resnet18", num_classes=10, pretrained=False)
+    path = tmp_path / "ent_missing.pth"
+    payload = {
+        "state_dict": model.state_dict(),
+        "config": {
+            "backbone": "resnet18",
+            "num_classes": 10,
+            "routing_policy": "entropy",  # claims entropy...
+            "confidence_thresholds": [0.85, 0.80],
+            # ...but no entropy_thresholds key
+            "loss_weights": [0.2, 0.3, 0.5],
+            "temperature": 1.0,
+        },
+    }
+    torch.save(payload, path)
+    with pytest.raises(ValueError, match="entropy_thresholds"):
+        load_wrapper(path)
+
+
+def test_load_wrapper_rejects_invalid_routing_policy(tmp_path):
+    """A corrupted checkpoint with an unknown routing_policy must raise on load
+    rather than silently mis-route (load bypasses EarlyExitConfig validation)."""
+    import pytest
+    import torch
+
+    from earlyon.utils import build_model, load_wrapper
+
+    model = build_model("resnet18", num_classes=10, pretrained=False)
+    path = tmp_path / "badpolicy.pth"
+    payload = {
+        "state_dict": model.state_dict(),
+        "config": {
+            "backbone": "resnet18",
+            "num_classes": 10,
+            "routing_policy": "budget",  # not a supported policy
+            "confidence_thresholds": [0.85, 0.80],
+            "entropy_thresholds": [0.5, 0.5],
+            "loss_weights": [0.2, 0.3, 0.5],
+            "temperature": 1.0,
+        },
+    }
+    torch.save(payload, path)
+
+    with pytest.raises(ValueError, match="routing_policy"):
+        load_wrapper(path)
+
+
 def test_load_wrapper_rejects_mismatched_threshold_count(tmp_path):
     """Saved checkpoint with N+1 thresholds vs N-exit factory must raise
     ValueError before mutating model.config."""
     import torch
+
     from earlyon.utils import build_model, load_wrapper
 
     model = build_model("resnet18", num_classes=10, pretrained=False)
@@ -103,6 +236,7 @@ def test_load_wrapper_rejects_mismatched_threshold_count(tmp_path):
 
 def test_load_wrapper_rejects_mismatched_loss_weights(tmp_path):
     import torch
+
     from earlyon.utils import build_model, load_wrapper
 
     model = build_model("resnet18", num_classes=10, pretrained=False)
