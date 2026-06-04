@@ -10,6 +10,8 @@ from torch.utils.data import DataLoader
 
 from earlyon.core.wrappers import EarlyExitWrapper
 
+_Batch = tuple[torch.Tensor, torch.Tensor]
+
 
 @dataclass
 class AccuracyReport:
@@ -22,7 +24,7 @@ class AccuracyReport:
 
 def evaluate(
     model: EarlyExitWrapper,
-    loader: DataLoader,
+    loader: DataLoader[_Batch],
     device: str = "cpu",
     class_names: list[str] | None = None,
 ) -> AccuracyReport:

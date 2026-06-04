@@ -1,5 +1,7 @@
 """Wrapper invariants and routing behavior."""
 
+import warnings
+
 import pytest
 import torch
 
@@ -56,6 +58,63 @@ def test_inference_returns_inference_result():
     assert -1 <= result.exit_taken < 3
     assert 0.0 <= result.confidence <= 1.0
     assert 0.0 < result.computation_used <= 1.0
+
+
+@pytest.mark.parametrize("thresholds", [(0.0, 0.0, 0.0), (1.0, 1.0, 1.0)])
+def test_inference_prediction_is_grad_free_without_external_no_grad(thresholds):
+    """Regression for the autograd-graph leak: calling inference WITHOUT an
+    external no_grad/inference_mode context (exactly the documented quick-start
+    pattern) must still return a graph-free prediction and emit no
+    requires_grad-to-scalar UserWarning. Covers both the early-exit path
+    (thresholds=0) and the final-classifier fall-through (thresholds=1)."""
+    wrapper, _ = _build(thresholds=thresholds)
+    wrapper.eval()
+    x = torch.randn(1, 3, 32, 32)
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        result = wrapper(x, mode="inference")  # deliberately no no_grad()
+    assert result.prediction.requires_grad is False
+    assert result.prediction.grad_fn is None
+    grad_warnings = [w for w in record if "requires_grad" in str(w.message)]
+    assert not grad_warnings, f"unexpected requires_grad warning: {grad_warnings}"
+
+
+def test_batched_inference_prediction_is_grad_free_without_external_no_grad():
+    """Same grad-free guarantee for the batched routing path."""
+    wrapper = _build(thresholds=(0.0, 0.0, 0.0))[0]
+    wrapper.eval()
+    result = wrapper.forward_inference_batched(torch.randn(4, 3, 32, 32))
+    assert result.predictions.requires_grad is False
+    assert result.predictions.grad_fn is None
+    assert result.per_sample_confidence.requires_grad is False
+
+
+@pytest.mark.parametrize("bad_temp", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_temperature_does_not_poison_softmax(bad_temp):
+    """A NaN/Inf config.temperature (e.g. from a degenerate fit) must not turn
+    every softmax into NaN: _safe_temperature falls back to 1.0 so routing stays
+    well-defined and confidence is finite. Inf is the consequential case — the
+    old `max(inf, 1e-6)` left T=inf, making every softmax uniform."""
+    import math
+
+    wrapper, _ = _build(thresholds=(1.0, 1.0, 1.0))
+    wrapper.eval()
+    wrapper.config.temperature = bad_temp
+    result = wrapper(torch.randn(1, 3, 32, 32), mode="inference")
+    assert math.isfinite(result.confidence)
+    assert torch.isfinite(result.prediction).all()
+
+
+def test_safe_temperature_clamps_to_positive_finite():
+    """Unit-level guarantees of the temperature guard."""
+    from earlyon.core.wrappers import _safe_temperature
+
+    assert _safe_temperature(float("nan")) == 1.0
+    assert _safe_temperature(float("inf")) == 1.0
+    assert _safe_temperature(float("-inf")) == 1.0
+    assert _safe_temperature(0.0) == 1e-6  # non-positive clamps up
+    assert _safe_temperature(-5.0) == 1e-6
+    assert _safe_temperature(2.5) == 2.5  # finite positive passes through
 
 
 def test_thresholds_one_means_no_early_exit():

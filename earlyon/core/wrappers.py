@@ -8,8 +8,9 @@ short-circuit an opaque ``nn.Module.forward`` from inside a hook.
 
 from __future__ import annotations
 
+import math
 import threading
-from typing import TYPE_CHECKING, Callable, Iterator, Optional
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Optional
 
 import torch
 import torch.nn as nn
@@ -19,6 +20,20 @@ from earlyon.core.types import EarlyExitConfig, InferenceResult
 
 if TYPE_CHECKING:
     from earlyon.core.types import BatchedInferenceResult
+
+
+def _safe_temperature(temperature: float) -> float:
+    """Clamp the softmax temperature to a strictly positive, finite value.
+
+    A NaN/Inf temperature (e.g. from a diverged ``fit_temperature`` on degenerate
+    logits) would otherwise poison every softmax: ``max(nan, 1e-6)`` returns
+    ``nan`` because Python ``max`` keeps its first argument on a False compare,
+    and ``softmax(logits / nan)`` is silently all-NaN. Falling back to 1.0
+    (the no-op temperature) keeps routing well-defined.
+    """
+    if not math.isfinite(temperature):
+        return 1.0
+    return max(temperature, 1e-6)
 
 
 def _is_compiling() -> bool:
@@ -73,7 +88,7 @@ class EarlyExitWrapper(nn.Module):
     def __init__(
         self,
         backbone: nn.Module,
-        exit_heads: dict[str, nn.Module],
+        exit_heads: Mapping[str, nn.Module],
         final_classifier: Callable[[torch.Tensor], torch.Tensor],
         config: EarlyExitConfig,
         input_shape: tuple[int, int, int, int] = (1, 3, 224, 224),
@@ -94,6 +109,14 @@ class EarlyExitWrapper(nn.Module):
         # per-thread caches: a single wrapper instance can be called from
         # multiple threads (DataParallel, inference servers). state lives in
         # threading.local so concurrent training/inference calls don't collide.
+        #
+        # CAVEAT: this state is per-thread, not per-call-frame. Re-entrant use of
+        # the same wrapper on one thread — i.e. a custom ``backbone`` or
+        # ``final_classifier`` that itself calls back into this wrapper's
+        # forward — is unsupported: the inner call's ``finally`` resets the
+        # inference/training flags while the outer call is still running. No
+        # shipped backbone or factory does this (final_classifier is identity),
+        # so it cannot occur in normal use.
         self._tls = threading.local()
 
         self._hook_handles: list[torch.utils.hooks.RemovableHandle] = []
@@ -153,27 +176,38 @@ class EarlyExitWrapper(nn.Module):
         self._tls.inference_mode = True
         self._tls.batched_mode = True
         try:
-            try:
-                feats = self.backbone(x)
-            except _EarlyExitSignal as sig:
-                layer_name = self._exits[sig.exit_idx][2]
+            # inference_mode() keeps the returned logits/confidences free of an
+            # autograd graph; without it a caller that does not wrap the call in
+            # no_grad (e.g. the README quick-start) retains a graph per call and
+            # leaks memory in a server loop.
+            with torch.inference_mode():
+                try:
+                    feats = self.backbone(x)
+                except _EarlyExitSignal as sig:
+                    layer_name = self._exits[sig.exit_idx][2]
+                    # invariant: a batched-mode raise always carries this tensor.
+                    # explicit raise (not assert) so it survives `python -O`.
+                    if sig.per_sample_confidence is None:
+                        raise RuntimeError(
+                            "batched early-exit signal must carry per_sample_confidence"
+                        )
+                    return BatchedInferenceResult(
+                        predictions=sig.prediction,
+                        exit_taken=sig.exit_idx,
+                        per_sample_confidence=sig.per_sample_confidence,
+                        computation_used=self._flops_at[layer_name],
+                    )
+                # no exit fired
+                final_logits = self._final_classifier(feats)
+                temp = _safe_temperature(self.config.temperature)
+                probs = torch.softmax(final_logits / temp, dim=-1)
+                per_sample_conf = probs.max(dim=-1).values
                 return BatchedInferenceResult(
-                    predictions=sig.prediction,
-                    exit_taken=sig.exit_idx,
-                    per_sample_confidence=sig.per_sample_confidence,
-                    computation_used=self._flops_at[layer_name],
+                    predictions=final_logits,
+                    exit_taken=-1,
+                    per_sample_confidence=per_sample_conf,
+                    computation_used=1.0,
                 )
-            # no exit fired
-            final_logits = self._final_classifier(feats)
-            temp = max(self.config.temperature, 1e-6)
-            probs = torch.softmax(final_logits / temp, dim=-1)
-            per_sample_conf = probs.max(dim=-1).values
-            return BatchedInferenceResult(
-                predictions=final_logits,
-                exit_taken=-1,
-                per_sample_confidence=per_sample_conf,
-                computation_used=1.0,
-            )
         finally:
             self._tls.inference_mode = False
             self._tls.batched_mode = False
@@ -186,8 +220,10 @@ class EarlyExitWrapper(nn.Module):
             handle = module.register_forward_hook(self._make_hook(exit_idx, exit_name))
             self._hook_handles.append(handle)
 
-    def _make_hook(self, exit_idx: int, exit_name: str):
-        def hook(module: nn.Module, inputs, output):
+    def _make_hook(
+        self, exit_idx: int, exit_name: str
+    ) -> Callable[[nn.Module, Any, torch.Tensor], torch.Tensor]:
+        def hook(module: nn.Module, inputs: Any, output: torch.Tensor) -> torch.Tensor:
             # torch.compile / dynamo: dynamic control flow in this hook will
             # cause silent eager fallback, killing the speedup. detect and
             # bail with a clear error so the user fixes it explicitly.
@@ -213,7 +249,7 @@ class EarlyExitWrapper(nn.Module):
                 getattr(self._tls, "training_outputs", []).append(logits)
                 return output
 
-            temp = max(self.config.temperature, 1e-6)
+            temp = _safe_temperature(self.config.temperature)
             probs = torch.softmax(logits / temp, dim=-1)
             policy = self.config.routing_policy
 
@@ -231,7 +267,7 @@ class EarlyExitWrapper(nn.Module):
                     raise _EarlyExitSignal(
                         exit_idx,
                         logits,
-                        float(per_sample_conf.min()),
+                        per_sample_conf.min().item(),
                         per_sample_confidence=per_sample_conf,
                     )
             else:
@@ -241,15 +277,19 @@ class EarlyExitWrapper(nn.Module):
                         f"batch_size=1 (got {logits.size(0)}); use "
                         "forward_inference_batched(x) for batched routing"
                     )
-                confidence = float(probs.max())
+                # .item() (not float(...)) so no UserWarning fires even when the
+                # caller wraps inference in a weaker torch.no_grad() context.
+                confidence = probs.max().item()
                 if policy == "confidence":
                     threshold = self.config.confidence_thresholds[exit_idx]
                     if confidence >= threshold:
                         raise _EarlyExitSignal(exit_idx, logits, confidence)
                 else:  # entropy
-                    entropy = float(-(probs * probs.clamp_min(1e-12).log()).sum())
+                    # distinct name from the batched-branch ``entropy`` Tensor
+                    # above so the closure scope stays single-typed (float).
+                    entropy_scalar = (-(probs * probs.clamp_min(1e-12).log()).sum()).item()
                     threshold = self.config.entropy_thresholds[exit_idx]
-                    if entropy <= threshold:
+                    if entropy_scalar <= threshold:
                         raise _EarlyExitSignal(exit_idx, logits, confidence)
             return output
 
@@ -272,27 +312,30 @@ class EarlyExitWrapper(nn.Module):
         self._init_tls()
         self._tls.inference_mode = True
         try:
-            try:
-                feats = self.backbone(x)
-            except _EarlyExitSignal as sig:
-                layer_name = self._exits[sig.exit_idx][2]
+            # see forward_inference_batched: inference_mode() prevents the
+            # returned prediction from carrying an autograd graph.
+            with torch.inference_mode():
+                try:
+                    feats = self.backbone(x)
+                except _EarlyExitSignal as sig:
+                    layer_name = self._exits[sig.exit_idx][2]
+                    return InferenceResult(
+                        prediction=sig.prediction,
+                        exit_taken=sig.exit_idx,
+                        confidence=sig.confidence,
+                        computation_used=self._flops_at[layer_name],
+                    )
+                # no exit triggered — use final classifier (inside outer try so
+                # any exception still resets inference_mode)
+                final_logits = self._final_classifier(feats)
+                temp = _safe_temperature(self.config.temperature)
+                probs = torch.softmax(final_logits / temp, dim=-1)
+                confidence = probs.max().item()
                 return InferenceResult(
-                    prediction=sig.prediction,
-                    exit_taken=sig.exit_idx,
-                    confidence=sig.confidence,
-                    computation_used=self._flops_at[layer_name],
+                    prediction=final_logits,
+                    exit_taken=-1,
+                    confidence=confidence,
+                    computation_used=1.0,
                 )
-            # no exit triggered — use final classifier (inside outer try so
-            # any exception still resets inference_mode)
-            final_logits = self._final_classifier(feats)
-            temp = max(self.config.temperature, 1e-6)
-            probs = torch.softmax(final_logits / temp, dim=-1)
-            confidence = probs.max().item()
-            return InferenceResult(
-                prediction=final_logits,
-                exit_taken=-1,
-                confidence=confidence,
-                computation_used=1.0,
-            )
         finally:
             self._tls.inference_mode = False

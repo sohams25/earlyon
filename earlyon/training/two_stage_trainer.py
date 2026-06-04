@@ -10,6 +10,7 @@ forgetting this causes exit-head accuracy to drift between runs.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Callable
 
@@ -21,6 +22,8 @@ from torch.utils.data import DataLoader
 from earlyon.core.wrappers import EarlyExitWrapper
 from earlyon.training.losses import weighted_multi_exit_loss
 
+_Batch = tuple[torch.Tensor, torch.Tensor]
+
 
 @dataclass
 class TrainStepLog:
@@ -31,6 +34,20 @@ class TrainStepLog:
 
 
 LogFn = Callable[[TrainStepLog], None]
+
+
+def _warn_if_val_loader_unused(val_loader: DataLoader[_Batch] | None) -> None:
+    """The trainers accept ``val_loader`` for forward-compatibility but do not
+    yet use it (no early stopping or best-checkpoint selection). Warn rather
+    than silently ignore so callers don't assume validation-driven behavior."""
+    if val_loader is not None:
+        warnings.warn(
+            "val_loader is accepted for forward-compatibility but is not yet "
+            "used: no early stopping or best-checkpoint selection is performed. "
+            "Evaluate on the validation set separately after training.",
+            UserWarning,
+            stacklevel=3,
+        )
 
 
 def _default_log(log: TrainStepLog) -> None:
@@ -45,8 +62,8 @@ def _default_log(log: TrainStepLog) -> None:
 
 def stage1_train_backbone(
     backbone: nn.Module,
-    train_loader: DataLoader,
-    val_loader: DataLoader | None = None,
+    train_loader: DataLoader[_Batch],
+    val_loader: DataLoader[_Batch] | None = None,
     epochs: int = 90,
     lr: float = 0.1,
     momentum: float = 0.9,
@@ -54,7 +71,12 @@ def stage1_train_backbone(
     device: str = "cpu",
     on_epoch_end: LogFn = _default_log,
 ) -> nn.Module:
-    """Train ``backbone`` as a standard classifier. Exits are not involved."""
+    """Train ``backbone`` as a standard classifier. Exits are not involved.
+
+    ``val_loader`` is accepted but not yet used (see
+    :func:`_warn_if_val_loader_unused`).
+    """
+    _warn_if_val_loader_unused(val_loader)
     backbone = backbone.to(device)
     optimizer = torch.optim.SGD(
         backbone.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay
@@ -72,7 +94,7 @@ def stage1_train_backbone(
             logits = backbone(images)
             loss = F.cross_entropy(logits, targets)
             optimizer.zero_grad()
-            loss.backward()
+            loss.backward()  # type: ignore[no-untyped-call]  # torch stub gap
             optimizer.step()
             running_loss += loss.item() * images.size(0)
             correct += (logits.argmax(dim=-1) == targets).sum().item()
@@ -90,15 +112,20 @@ def stage1_train_backbone(
 
 def stage2_train_exits(
     model: EarlyExitWrapper,
-    train_loader: DataLoader,
-    val_loader: DataLoader | None = None,
+    train_loader: DataLoader[_Batch],
+    val_loader: DataLoader[_Batch] | None = None,
     epochs: int = 20,
     lr: float = 1e-3,
     weight_decay: float = 0.0,
     device: str = "cpu",
     on_epoch_end: LogFn = _default_log,
 ) -> EarlyExitWrapper:
-    """Freeze backbone, train only exit heads with weighted multi-exit CE."""
+    """Freeze backbone, train only exit heads with weighted multi-exit CE.
+
+    ``val_loader`` is accepted but not yet used (see
+    :func:`_warn_if_val_loader_unused`).
+    """
+    _warn_if_val_loader_unused(val_loader)
     model = model.to(device)
 
     # freeze backbone parameters AND keep BatchNorm in eval mode
@@ -131,7 +158,7 @@ def stage2_train_exits(
             outputs = model(images, mode="training")
             loss = weighted_multi_exit_loss(outputs, targets, model.config.loss_weights)
             optimizer.zero_grad()
-            loss.backward()
+            loss.backward()  # type: ignore[no-untyped-call]  # torch stub gap
             optimizer.step()
 
             running_loss += loss.item() * images.size(0)

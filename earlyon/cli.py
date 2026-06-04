@@ -138,9 +138,7 @@ def train_joint(
     dev = _device(device)
     train_loader, _, _ = cifar10_loaders(batch_size=batch_size)
     model = load_wrapper(model_path)
-    joint_train_backbone_and_exits(
-        model, train_loader, epochs=epochs, lr=lr, device=dev
-    )
+    joint_train_backbone_and_exits(model, train_loader, epochs=epochs, lr=lr, device=dev)
     save_wrapper(model, output)
     click.echo(f"wrote {output}")
 

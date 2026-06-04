@@ -61,6 +61,22 @@ def test_stage1_runs_one_epoch():
     assert out is bb
 
 
+def test_passing_val_loader_warns_that_it_is_unused():
+    """The trainers accept val_loader but don't use it yet; passing one must
+    warn rather than silently ignore it."""
+    import warnings
+
+    wrapper = _build_wrapper()
+    loader = _toy_loader(n=8)
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        stage2_train_exits(
+            wrapper, loader, val_loader=loader, epochs=1, device="cpu", on_epoch_end=lambda _: None
+        )
+    messages = [str(w.message) for w in captured if issubclass(w.category, UserWarning)]
+    assert any("val_loader" in m for m in messages), f"expected val_loader warning; got {messages}"
+
+
 def test_stage2_does_not_update_backbone():
     """Critical: stage 2 must leave backbone params and BN running stats unchanged."""
     wrapper = _build_wrapper()
@@ -119,9 +135,9 @@ def test_joint_trainer_does_not_freeze_batchnorm():
         wrapper, loader, epochs=1, lr=1e-2, device="cpu", on_epoch_end=lambda _: None
     )
     bn_running_mean_after = wrapper.backbone.stage1[1].running_mean.detach()
-    assert not torch.equal(bn_running_mean_before, bn_running_mean_after), (
-        "BN running_mean did not update; backbone was unexpectedly frozen"
-    )
+    assert not torch.equal(
+        bn_running_mean_before, bn_running_mean_after
+    ), "BN running_mean did not update; backbone was unexpectedly frozen"
 
 
 def test_joint_trainer_log_reports_per_exit_accuracy():

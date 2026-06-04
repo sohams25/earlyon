@@ -84,6 +84,12 @@ class InferenceResult:
     ``exit_taken`` is the 0-indexed exit number; -1 means the final classifier
     was used. ``computation_used`` is the FLOPs fraction (not layer count) of
     the network actually executed.
+
+    ``prediction`` is produced under ``torch.inference_mode()`` (the deployment
+    path is grad-free by contract), so it is an *inference tensor*: ready for
+    ``argmax``/``item``/serialization, but not usable in a tracked autograd
+    computation. For gradient-requiring work use ``model(x, mode="training")``,
+    or ``prediction.clone()`` *after* this call returns to detach it.
     """
 
     prediction: torch.Tensor

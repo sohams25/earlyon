@@ -16,11 +16,14 @@ import statistics
 import time
 from collections import Counter
 from dataclasses import asdict, dataclass
+from typing import Any, Iterator
 
 import torch
 from torch.utils.data import DataLoader
 
 from earlyon.core.wrappers import EarlyExitWrapper
+
+_Batch = tuple[torch.Tensor, torch.Tensor]
 
 
 @dataclass
@@ -35,7 +38,7 @@ class BenchmarkResult:
     num_runs: int
     device: str
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -104,7 +107,7 @@ def benchmark_wrapper(
 
 def benchmark_wrapper_on_loader(
     model: EarlyExitWrapper,
-    loader: DataLoader,
+    loader: DataLoader[_Batch],
     device: str = "cpu",
     num_warmup: int = 50,
     num_runs: int = 500,
@@ -121,9 +124,16 @@ def benchmark_wrapper_on_loader(
             f"benchmark_wrapper_on_loader requires loader.batch_size=1 "
             f"(got {loader.batch_size}); v0.2 inference is single-sample"
         )
+    # an empty loader would make the cycling sample_stream spin forever; fail fast.
+    try:
+        is_empty = len(loader) == 0
+    except TypeError:
+        is_empty = False  # unsized (IterableDataset) — cannot pre-check
+    if is_empty:
+        raise ValueError("benchmark_wrapper_on_loader requires a non-empty loader")
     model = model.to(device).eval()
 
-    def sample_stream():
+    def sample_stream() -> Iterator[torch.Tensor]:
         while True:
             for images, _targets in loader:
                 yield images.to(device)

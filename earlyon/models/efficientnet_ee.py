@@ -6,6 +6,7 @@ give a reasonable spread of compute across the network.
 
 from __future__ import annotations
 
+import torch
 import torch.nn as nn
 from torchvision.models import efficientnet_b0
 
@@ -14,7 +15,7 @@ from earlyon.core.types import EarlyExitConfig, ExitPoint
 from earlyon.core.wrappers import EarlyExitWrapper
 
 
-def _identity(x):
+def _identity(x: torch.Tensor) -> torch.Tensor:
     return x
 
 

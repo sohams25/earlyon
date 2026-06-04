@@ -16,6 +16,8 @@ counterpart to the ImageNet ResNets for CIFAR-scale benchmarking.
 
 from __future__ import annotations
 
+from typing import cast
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -82,7 +84,9 @@ class CifarResNet(nn.Module):
         self._init_weights()
 
     @staticmethod
-    def _make_stage(in_channels: int, out_channels: int, n_blocks: int, stride: int) -> nn.Sequential:
+    def _make_stage(
+        in_channels: int, out_channels: int, n_blocks: int, stride: int
+    ) -> nn.Sequential:
         layers: list[nn.Module] = [_BasicBlock(in_channels, out_channels, stride=stride)]
         for _ in range(n_blocks - 1):
             layers.append(_BasicBlock(out_channels, out_channels, stride=1))
@@ -105,7 +109,8 @@ class CifarResNet(nn.Module):
         x = self.stage2(x)
         x = self.stage3(x)
         x = self.avgpool(x).flatten(1)
-        return self.fc(x)
+        # nn.Linear.__call__ is typed -> Any in the torch stubs; runtime is Tensor.
+        return cast(torch.Tensor, self.fc(x))
 
 
 def _identity(x: torch.Tensor) -> torch.Tensor:
@@ -149,8 +154,7 @@ def cifar_resnet_ee(
         ExitPoint("e2", "stage3", _STAGE_CHANNELS[2]),
     ]
     heads = {
-        ep.name: EarlyExitHead(ep.in_channels, num_classes, hidden_dim=64)
-        for ep in exit_points
+        ep.name: EarlyExitHead(ep.in_channels, num_classes, hidden_dim=64) for ep in exit_points
     }
     cfg = EarlyExitConfig(
         backbone=f"cifar_resnet{depth}",

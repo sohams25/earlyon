@@ -27,5 +27,8 @@ jobs:
         run: |
           ruff check earlyon tests
           black --check earlyon tests
+          isort --check-only earlyon tests
+      - name: type-check
+        run: mypy earlyon
       - name: test
         run: pytest -m "not gpu" --cov=earlyon --cov-report=term-missing

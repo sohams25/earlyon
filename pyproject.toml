@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "earlyon"
-version = "0.1.0"
+version = "0.2.0"
 description = "Production-ready early exit for PyTorch CV models."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ license = { file = "LICENSE" }
 authors = [{ name = "Soham", email = "sohams.web@gmail.com" }]
 keywords = ["pytorch", "early-exit", "inference", "edge", "jetson", "branchynet"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
@@ -63,6 +63,16 @@ line_length = 100
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["earlyon"]
+
+# torchvision and fvcore ship no py.typed marker and have no stubs on PyPI.
+[[tool.mypy.overrides]]
+module = ["torchvision.*", "fvcore.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

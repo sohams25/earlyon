@@ -32,51 +32,60 @@ def per_layer_flops(
         n = len(layer_names)
         return {name: (i + 1) / (n + 1) for i, name in enumerate(layer_names)}
 
+    # eval() for a deterministic FLOPs probe, but restore the caller's mode:
+    # this runs inside EarlyExitWrapper.__init__, and silently leaving a
+    # training backbone in eval would freeze BatchNorm in a custom training loop.
+    was_training = backbone.training
     backbone.eval()
-    dummy = torch.zeros(input_shape)
-    fca = FlopCountAnalysis(backbone, dummy)
-    fca.unsupported_ops_warnings(False)
-    fca.uncalled_modules_warnings(False)
-    total = fca.total()
-    by_module = fca.by_module()
+    try:
+        dummy = torch.zeros(input_shape)
+        fca = FlopCountAnalysis(backbone, dummy)
+        fca.unsupported_ops_warnings(False)
+        fca.uncalled_modules_warnings(False)
+        total = fca.total()
+        by_module = fca.by_module()
 
-    if total == 0:
-        n = len(layer_names)
-        return {name: (i + 1) / (n + 1) for i, name in enumerate(layer_names)}
-
-    # Forward order = order returned by named_modules. Filter to leaves only
-    # (modules with no children) to avoid double-counting containers.
-    ordered_leaves = [
-        name for name, mod in backbone.named_modules() if name and len(list(mod.children())) == 0
-    ]
-
-    # The "end" of an exit at layer L is the last leaf whose name belongs to
-    # L (equals L or is nested under it). Anything past that point hasn't run
-    # yet when the exit fires.
-    cumulative: dict[str, float] = {}
-    for layer in layer_names:
-        last_idx = -1
-        for i, leaf in enumerate(ordered_leaves):
-            if leaf == layer or leaf.startswith(layer + "."):
-                last_idx = i
-        if last_idx < 0:
-            # target isn't a leaf or doesn't contain leaves: fall back to
-            # uniform spacing for this entry
+        if total == 0:
             n = len(layer_names)
-            cumulative[layer] = (list(layer_names).index(layer) + 1) / (n + 1)
-            continue
-        running = sum(int(by_module.get(ordered_leaves[i], 0)) for i in range(last_idx + 1))
-        ratio = running / total
-        if ratio > 1.05:
-            # latent overcount: either fvcore.total() underreports for
-            # partially-supported ops, or our leaf walk picked up something it
-            # shouldn't. clamp below for safety but surface the discrepancy.
-            warnings.warn(
-                f"flops accounting overcount at layer {layer!r}: "
-                f"running/total={ratio:.3f} (> 1.05); clamping to 1.0",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-        cumulative[layer] = min(ratio, 1.0)
+            return {name: (i + 1) / (n + 1) for i, name in enumerate(layer_names)}
 
-    return cumulative
+        # Forward order = order returned by named_modules. Filter to leaves only
+        # (modules with no children) to avoid double-counting containers.
+        ordered_leaves = [
+            name
+            for name, mod in backbone.named_modules()
+            if name and len(list(mod.children())) == 0
+        ]
+
+        # The "end" of an exit at layer L is the last leaf whose name belongs to
+        # L (equals L or is nested under it). Anything past that point hasn't run
+        # yet when the exit fires.
+        cumulative: dict[str, float] = {}
+        for layer in layer_names:
+            last_idx = -1
+            for i, leaf in enumerate(ordered_leaves):
+                if leaf == layer or leaf.startswith(layer + "."):
+                    last_idx = i
+            if last_idx < 0:
+                # target isn't a leaf or doesn't contain leaves: fall back to
+                # uniform spacing for this entry
+                n = len(layer_names)
+                cumulative[layer] = (list(layer_names).index(layer) + 1) / (n + 1)
+                continue
+            running = sum(int(by_module.get(ordered_leaves[i], 0)) for i in range(last_idx + 1))
+            ratio = running / total
+            if ratio > 1.05:
+                # latent overcount: either fvcore.total() underreports for
+                # partially-supported ops, or our leaf walk picked up something it
+                # shouldn't. clamp below for safety but surface the discrepancy.
+                warnings.warn(
+                    f"flops accounting overcount at layer {layer!r}: "
+                    f"running/total={ratio:.3f} (> 1.05); clamping to 1.0",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            cumulative[layer] = min(ratio, 1.0)
+
+        return cumulative
+    finally:
+        backbone.train(was_training)
