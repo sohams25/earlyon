@@ -68,6 +68,10 @@ target-version = "py310"
 python_version = "3.10"
 strict = true
 files = ["earlyon"]
+# torch's stubs type .backward()/.step() inconsistently across versions; keep the
+# targeted `type: ignore[no-untyped-call]` comments tolerant so an unpinned CI
+# torch can't fail the strict run on an "unused ignore".
+warn_unused_ignores = false
 
 # torchvision and fvcore ship no py.typed marker and have no stubs on PyPI.
 [[tool.mypy.overrides]]
