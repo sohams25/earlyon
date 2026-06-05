@@ -6,18 +6,13 @@ give a reasonable spread of compute across the network.
 
 from __future__ import annotations
 
-import torch
 import torch.nn as nn
 from torchvision.models import efficientnet_b0
 
 from earlyon.core.exit_head import EarlyExitHead
 from earlyon.core.types import EarlyExitConfig, ExitPoint
 from earlyon.core.wrappers import EarlyExitWrapper
-
-
-def _identity(x: torch.Tensor) -> torch.Tensor:
-    return x
-
+from earlyon.models._common import identity
 
 # Channel counts at the exit points (from the efficientnet-b0 spec)
 _EFFNET_B0_CHANNELS = {"features.3": 40, "features.5": 112}
@@ -43,4 +38,4 @@ def efficientnet_b0_ee(num_classes: int, pretrained: bool = True) -> EarlyExitWr
         confidence_thresholds=[0.85, 0.80],
         loss_weights=[0.2, 0.3, 0.5],
     )
-    return EarlyExitWrapper(backbone, heads, _identity, cfg)
+    return EarlyExitWrapper(backbone, heads, identity, cfg)

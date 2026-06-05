@@ -21,9 +21,8 @@ from typing import Any, Iterator
 import torch
 from torch.utils.data import DataLoader
 
+from earlyon.core.types import Batch, exit_label
 from earlyon.core.wrappers import EarlyExitWrapper
-
-_Batch = tuple[torch.Tensor, torch.Tensor]
 
 
 @dataclass
@@ -87,10 +86,7 @@ def benchmark_wrapper(
         wall_total = time.perf_counter() - wall_start
 
     # exit_distribution keys: "exit_0", "exit_1", ..., "final"
-    def label(idx: int) -> str:
-        return "final" if idx == -1 else f"exit_{idx}"
-
-    dist = {label(k): v / num_runs for k, v in exits.items()}
+    dist = {exit_label(k): v / num_runs for k, v in exits.items()}
 
     return BenchmarkResult(
         throughput_ips=num_runs / wall_total,
@@ -107,7 +103,7 @@ def benchmark_wrapper(
 
 def benchmark_wrapper_on_loader(
     model: EarlyExitWrapper,
-    loader: DataLoader[_Batch],
+    loader: DataLoader[Batch],
     device: str = "cpu",
     num_warmup: int = 50,
     num_runs: int = 500,
@@ -162,10 +158,7 @@ def benchmark_wrapper_on_loader(
             comp_used.append(result.computation_used)
         wall_total = time.perf_counter() - wall_start
 
-    def label(idx: int) -> str:
-        return "final" if idx == -1 else f"exit_{idx}"
-
-    dist = {label(k): v / num_runs for k, v in exits.items()}
+    dist = {exit_label(k): v / num_runs for k, v in exits.items()}
 
     return BenchmarkResult(
         throughput_ips=num_runs / wall_total,

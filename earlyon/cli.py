@@ -65,6 +65,7 @@ def train() -> None:
 @click.option("--lr", default=0.1, type=float)
 @click.option("--batch-size", default=128, type=int)
 @click.option("--device", default="auto")
+@click.option("--validate/--no-validate", default=False, help="report val metrics each epoch")
 @click.option("--output", required=True, type=click.Path())
 def train_backbone(
     backbone: str,
@@ -74,15 +75,17 @@ def train_backbone(
     lr: float,
     batch_size: int,
     device: str,
+    validate: bool,
     output: str,
 ) -> None:
     """Stage 1: train the backbone as a standard classifier."""
     dev = _device(device)
-    train_loader, _, _ = cifar10_loaders(batch_size=batch_size)
+    train_loader, val_loader, _ = cifar10_loaders(batch_size=batch_size, val_batch_size=batch_size)
     model = build_model(backbone, num_classes=num_classes, pretrained=True)
     stage1_train_backbone(
         model.backbone,
         train_loader,
+        val_loader=val_loader if validate else None,
         epochs=epochs,
         lr=lr,
         device=dev,
@@ -98,6 +101,7 @@ def train_backbone(
 @click.option("--lr", default=1e-3, type=float)
 @click.option("--batch-size", default=128, type=int)
 @click.option("--device", default="auto")
+@click.option("--validate/--no-validate", default=False, help="report val metrics each epoch")
 @click.option("--output", required=True, type=click.Path())
 def train_exits(
     model_path: str,
@@ -106,13 +110,21 @@ def train_exits(
     lr: float,
     batch_size: int,
     device: str,
+    validate: bool,
     output: str,
 ) -> None:
     """Stage 2: freeze backbone, train exit heads."""
     dev = _device(device)
-    train_loader, _, _ = cifar10_loaders(batch_size=batch_size)
+    train_loader, val_loader, _ = cifar10_loaders(batch_size=batch_size, val_batch_size=batch_size)
     model = load_wrapper(model_path)
-    stage2_train_exits(model, train_loader, epochs=epochs, lr=lr, device=dev)
+    stage2_train_exits(
+        model,
+        train_loader,
+        val_loader=val_loader if validate else None,
+        epochs=epochs,
+        lr=lr,
+        device=dev,
+    )
     save_wrapper(model, output)
     click.echo(f"wrote {output}")
 
@@ -124,6 +136,7 @@ def train_exits(
 @click.option("--lr", default=1e-2, type=float)
 @click.option("--batch-size", default=128, type=int)
 @click.option("--device", default="auto")
+@click.option("--validate/--no-validate", default=False, help="report val metrics each epoch")
 @click.option("--output", required=True, type=click.Path())
 def train_joint(
     model_path: str,
@@ -132,13 +145,21 @@ def train_joint(
     lr: float,
     batch_size: int,
     device: str,
+    validate: bool,
     output: str,
 ) -> None:
     """Joint training: backbone and exit heads update together."""
     dev = _device(device)
-    train_loader, _, _ = cifar10_loaders(batch_size=batch_size)
+    train_loader, val_loader, _ = cifar10_loaders(batch_size=batch_size, val_batch_size=batch_size)
     model = load_wrapper(model_path)
-    joint_train_backbone_and_exits(model, train_loader, epochs=epochs, lr=lr, device=dev)
+    joint_train_backbone_and_exits(
+        model,
+        train_loader,
+        val_loader=val_loader if validate else None,
+        epochs=epochs,
+        lr=lr,
+        device=dev,
+    )
     save_wrapper(model, output)
     click.echo(f"wrote {output}")
 

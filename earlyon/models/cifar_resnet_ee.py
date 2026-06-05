@@ -25,6 +25,7 @@ import torch.nn.functional as F
 from earlyon.core.exit_head import EarlyExitHead
 from earlyon.core.types import EarlyExitConfig, ExitPoint
 from earlyon.core.wrappers import EarlyExitWrapper
+from earlyon.models._common import identity
 
 _STAGE_CHANNELS = (16, 32, 64)
 
@@ -113,10 +114,6 @@ class CifarResNet(nn.Module):
         return cast(torch.Tensor, self.fc(x))
 
 
-def _identity(x: torch.Tensor) -> torch.Tensor:
-    return x
-
-
 def cifar_resnet_ee(
     num_classes: int,
     depth: int = 56,
@@ -163,4 +160,4 @@ def cifar_resnet_ee(
         confidence_thresholds=[0.9, 0.85, 0.8],
         loss_weights=[0.15, 0.2, 0.25, 0.4],
     )
-    return EarlyExitWrapper(backbone, heads, _identity, cfg, input_shape=(1, 3, 32, 32))
+    return EarlyExitWrapper(backbone, heads, identity, cfg, input_shape=(1, 3, 32, 32))

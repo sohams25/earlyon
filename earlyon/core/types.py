@@ -7,6 +7,14 @@ from dataclasses import dataclass, field
 
 import torch
 
+# A (images, targets) minibatch — the element type of every earlyon DataLoader.
+Batch = tuple[torch.Tensor, torch.Tensor]
+
+
+def exit_label(idx: int) -> str:
+    """Canonical name for an exit index: ``"final"`` for -1, else ``"exit_{idx}"``."""
+    return "final" if idx == -1 else f"exit_{idx}"
+
 
 @dataclass(frozen=True)
 class ExitPoint:

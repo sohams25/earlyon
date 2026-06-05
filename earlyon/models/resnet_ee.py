@@ -10,21 +10,17 @@ is identity.
 
 from __future__ import annotations
 
-import torch
 import torch.nn as nn
 from torchvision.models import resnet18, resnet50
 
 from earlyon.core.exit_head import EarlyExitHead
 from earlyon.core.types import EarlyExitConfig, ExitPoint
 from earlyon.core.wrappers import EarlyExitWrapper
+from earlyon.models._common import identity
 
 # torchvision ResNet block output channels (BasicBlock for r18, Bottleneck for r50)
 _R18_CHANNELS = {"layer1": 64, "layer2": 128, "layer3": 256, "layer4": 512}
 _R50_CHANNELS = {"layer1": 256, "layer2": 512, "layer3": 1024, "layer4": 2048}
-
-
-def _identity(x: torch.Tensor) -> torch.Tensor:
-    return x
 
 
 def resnet50_ee(num_classes: int, pretrained: bool = True) -> EarlyExitWrapper:
@@ -47,7 +43,7 @@ def resnet50_ee(num_classes: int, pretrained: bool = True) -> EarlyExitWrapper:
         confidence_thresholds=[0.85, 0.80, 0.75],
         loss_weights=[0.1, 0.2, 0.3, 0.4],
     )
-    return EarlyExitWrapper(backbone, heads, _identity, cfg)
+    return EarlyExitWrapper(backbone, heads, identity, cfg)
 
 
 def resnet18_ee(num_classes: int, pretrained: bool = True) -> EarlyExitWrapper:
@@ -67,4 +63,4 @@ def resnet18_ee(num_classes: int, pretrained: bool = True) -> EarlyExitWrapper:
         confidence_thresholds=[0.85, 0.80],
         loss_weights=[0.2, 0.3, 0.5],
     )
-    return EarlyExitWrapper(backbone, heads, _identity, cfg)
+    return EarlyExitWrapper(backbone, heads, identity, cfg)
