@@ -61,20 +61,176 @@ def test_stage1_runs_one_epoch():
     assert out is bb
 
 
-def test_passing_val_loader_warns_that_it_is_unused():
-    """The trainers accept val_loader but don't use it yet; passing one must
-    warn rather than silently ignore it."""
+def test_stage1_reports_validation_metrics():
+    """A val_loader makes stage 1 report per-epoch val loss/accuracy."""
+    bb = TinyBackbone(num_classes=10)
+    logs: list = []
+    stage1_train_backbone(
+        bb,
+        _toy_loader(n=16),
+        val_loader=_toy_loader(n=8),
+        epochs=1,
+        lr=0.01,
+        device="cpu",
+        on_epoch_end=logs.append,
+    )
+    assert len(logs) == 1
+    assert logs[0].val_loss is not None and logs[0].val_loss >= 0.0
+    assert logs[0].val_accuracy is not None and 0.0 <= logs[0].val_accuracy <= 1.0
+
+
+def test_stage2_reports_validation_metrics():
+    wrapper = _build_wrapper()
+    logs: list = []
+    stage2_train_exits(
+        wrapper,
+        _toy_loader(n=16),
+        val_loader=_toy_loader(n=8),
+        epochs=1,
+        device="cpu",
+        on_epoch_end=logs.append,
+    )
+    assert logs[0].val_loss is not None and logs[0].val_loss >= 0.0
+    assert logs[0].val_accuracy is not None and 0.0 <= logs[0].val_accuracy <= 1.0
+
+
+def test_joint_reports_validation_metrics():
+    wrapper = _build_wrapper()
+    logs: list = []
+    joint_train_backbone_and_exits(
+        wrapper,
+        _toy_loader(n=16),
+        val_loader=_toy_loader(n=8),
+        epochs=1,
+        device="cpu",
+        on_epoch_end=logs.append,
+    )
+    assert logs[0].val_loss is not None and logs[0].val_loss >= 0.0
+    assert logs[0].val_accuracy is not None and 0.0 <= logs[0].val_accuracy <= 1.0
+
+
+@pytest.mark.parametrize("which", ["stage1", "stage2", "joint"])
+def test_no_val_loader_leaves_metrics_none_without_warning(which):
+    """For every trainer, omitting val_loader leaves val metrics None and emits
+    no warning (the removed _warn_if_val_loader_unused is fully replaced)."""
     import warnings
 
-    wrapper = _build_wrapper()
-    loader = _toy_loader(n=8)
+    logs: list = []
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("always")
+        if which == "stage1":
+            stage1_train_backbone(
+                TinyBackbone(num_classes=10),
+                _toy_loader(n=16),
+                epochs=1,
+                lr=0.01,
+                device="cpu",
+                on_epoch_end=logs.append,
+            )
+        elif which == "stage2":
+            stage2_train_exits(
+                _build_wrapper(),
+                _toy_loader(n=16),
+                epochs=1,
+                device="cpu",
+                on_epoch_end=logs.append,
+            )
+        else:
+            joint_train_backbone_and_exits(
+                _build_wrapper(),
+                _toy_loader(n=16),
+                epochs=1,
+                device="cpu",
+                on_epoch_end=logs.append,
+            )
+    assert logs[0].val_loss is None and logs[0].val_accuracy is None
+    assert not [w for w in captured if "val_loader" in str(w.message)]
+
+
+def test_stage2_validation_does_not_update_backbone():
+    """The per-epoch validation forward pass must not mutate the frozen backbone:
+    BN running stats and weights stay put even with a val_loader and >1 epoch."""
+    wrapper = _build_wrapper()
+    bb_param = wrapper.backbone.stage1[0].weight.detach().clone()
+    bn_mean = wrapper.backbone.stage1[1].running_mean.detach().clone()
+    bn_var = wrapper.backbone.stage1[1].running_var.detach().clone()
+
+    stage2_train_exits(
+        wrapper,
+        _toy_loader(n=16),
+        val_loader=_toy_loader(n=8),
+        epochs=2,
+        lr=1e-2,
+        device="cpu",
+        on_epoch_end=lambda _: None,
+    )
+
+    assert torch.equal(bb_param, wrapper.backbone.stage1[0].weight.detach())
+    assert torch.equal(bn_mean, wrapper.backbone.stage1[1].running_mean.detach())
+    assert torch.equal(bn_var, wrapper.backbone.stage1[1].running_var.detach())
+
+
+def test_validation_restores_training_modes():
+    """Passing a val_loader must not change the returned model's train/eval mode:
+    the result is identical to the no-val run (validate snapshots + restores)."""
+    no_val = _build_wrapper()
+    stage2_train_exits(
+        no_val, _toy_loader(n=8), epochs=1, device="cpu", on_epoch_end=lambda _: None
+    )
+    with_val = _build_wrapper()
+    stage2_train_exits(
+        with_val,
+        _toy_loader(n=8),
+        val_loader=_toy_loader(n=8),
+        epochs=1,
+        device="cpu",
+        on_epoch_end=lambda _: None,
+    )
+    modes_no_val = {n: m.training for n, m in no_val.named_modules()}
+    modes_with_val = {n: m.training for n, m in with_val.named_modules()}
+    assert modes_no_val == modes_with_val
+
+
+def test_stage2_val_metrics_match_recomputation():
+    """The logged val metrics are the real computed numbers from the val loader,
+    not a placeholder — they match an independent recomputation on the same model."""
+    import math
+
+    from earlyon.training.two_stage_trainer import _validate_wrapper
+
+    torch.manual_seed(0)
+    wrapper = _build_wrapper()
+    val = DataLoader(
+        TensorDataset(torch.randn(8, 3, 32, 32), torch.randint(0, 10, (8,))),
+        batch_size=8,
+        shuffle=False,
+    )
+    logs: list = []
+    stage2_train_exits(
+        wrapper, _toy_loader(n=16), val_loader=val, epochs=1, device="cpu", on_epoch_end=logs.append
+    )
+    exp_loss, exp_acc = _validate_wrapper(wrapper, val, "cpu")
+    assert math.isclose(logs[-1].val_loss, exp_loss, rel_tol=1e-6)
+    assert math.isclose(logs[-1].val_accuracy, exp_acc, rel_tol=1e-6)
+
+
+def test_empty_val_loader_raises():
+    """An empty val_loader is a caller error; validation must fail fast rather
+    than report a misleading (0.0, 0.0)."""
+    wrapper = _build_wrapper()
+    empty = DataLoader(
+        TensorDataset(torch.empty(0, 3, 32, 32), torch.empty(0, dtype=torch.long)),
+        batch_size=8,
+    )
+    with pytest.raises(ValueError, match="no batches"):
         stage2_train_exits(
-            wrapper, loader, val_loader=loader, epochs=1, device="cpu", on_epoch_end=lambda _: None
+            wrapper,
+            _toy_loader(n=8),
+            val_loader=empty,
+            epochs=1,
+            device="cpu",
+            on_epoch_end=lambda _: None,
         )
-    messages = [str(w.message) for w in captured if issubclass(w.category, UserWarning)]
-    assert any("val_loader" in m for m in messages), f"expected val_loader warning; got {messages}"
 
 
 def test_stage2_does_not_update_backbone():

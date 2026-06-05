@@ -4,6 +4,20 @@ format follows [keep a changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## unreleased
 
+### added
+- the three trainers now use ``val_loader``: when supplied they compute
+  per-epoch validation loss/accuracy and report them via
+  ``TrainStepLog.val_loss``/``val_accuracy`` (previously the parameter was
+  accepted but ignored with a warning). Opt-in `earlyon train … --validate` CLI
+  flag, and a ``val_batch_size`` argument on ``cifar10_loaders`` for fast
+  batched validation.
+
+### changed
+- consolidated duplicated definitions: a single ``Batch`` alias and
+  ``exit_label`` helper in ``earlyon.core.types``, and one ``identity`` final
+  classifier in ``earlyon.models._common`` (were copy-pasted across 5 and 4
+  files respectively). No behavior change.
+
 ## 0.2.0 - 2026-06-04
 
 ### added

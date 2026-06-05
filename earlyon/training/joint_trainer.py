@@ -17,21 +17,21 @@ from __future__ import annotations
 import torch
 from torch.utils.data import DataLoader
 
+from earlyon.core.types import Batch, exit_label
 from earlyon.core.wrappers import EarlyExitWrapper
 from earlyon.training.losses import weighted_multi_exit_loss
 from earlyon.training.two_stage_trainer import (
     LogFn,
     TrainStepLog,
-    _Batch,
     _default_log,
-    _warn_if_val_loader_unused,
+    _validate_wrapper,
 )
 
 
 def joint_train_backbone_and_exits(
     model: EarlyExitWrapper,
-    train_loader: DataLoader[_Batch],
-    val_loader: DataLoader[_Batch] | None = None,
+    train_loader: DataLoader[Batch],
+    val_loader: DataLoader[Batch] | None = None,
     epochs: int = 30,
     lr: float = 1e-2,
     momentum: float = 0.9,
@@ -46,10 +46,9 @@ def joint_train_backbone_and_exits(
     parameter of ``model`` (backbone + exit heads) so callers don't accidentally
     freeze the backbone the way two-stage training does.
 
-    ``val_loader`` is accepted but not yet used (see
-    :func:`earlyon.training.two_stage_trainer._warn_if_val_loader_unused`).
+    When ``val_loader`` is given, validation loss/accuracy are reported each
+    epoch via ``TrainStepLog.val_loss``/``val_accuracy``.
     """
-    _warn_if_val_loader_unused(val_loader)
     model = model.to(device)
 
     # explicitly enable grads on backbone — defensive: users who previously
@@ -67,7 +66,7 @@ def joint_train_backbone_and_exits(
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
     n_exits = len(model.config.exit_points)
-    output_labels = [f"exit_{i}" for i in range(n_exits)] + ["final"]
+    output_labels = [exit_label(i) for i in range(n_exits)] + [exit_label(-1)]
 
     for epoch in range(epochs):
         # backbone + exits all in train mode (BN running stats update)
@@ -99,12 +98,18 @@ def joint_train_backbone_and_exits(
             label: correct_per_output[i] / max(total, 1) for i, label in enumerate(output_labels)
         }
         mean_acc = sum(per_exit_acc.values()) / len(per_exit_acc)
+
+        val_loss, val_acc = (None, None)
+        if val_loader is not None:
+            val_loss, val_acc = _validate_wrapper(model, val_loader, device)
         on_epoch_end(
             TrainStepLog(
                 epoch=epoch,
                 loss=running_loss / max(total, 1),
                 accuracy=mean_acc,
                 per_exit_accuracy=per_exit_acc,
+                val_loss=val_loss,
+                val_accuracy=val_acc,
             )
         )
 

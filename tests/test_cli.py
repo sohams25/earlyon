@@ -29,6 +29,70 @@ def test_train_subcommands_exist():
     assert "joint" in result.output
 
 
+def test_train_exits_validate_flag_threads_val_loader(tmp_path, monkeypatch):
+    """`--validate` must pass a real val_loader to the trainer (None otherwise),
+    and the CLI must request a batched val loader (val_batch_size == batch_size)."""
+    import earlyon.cli as cli
+
+    captured: dict = {}
+    sentinel_train, sentinel_val = object(), object()
+
+    def fake_loaders(batch_size=128, val_batch_size=1, **kw):
+        captured["val_batch_size"] = val_batch_size
+        return sentinel_train, sentinel_val, object()
+
+    def fake_stage2(model, train_loader, val_loader=None, **kw):
+        captured["val_loader"] = val_loader
+        return model
+
+    monkeypatch.setattr(cli, "cifar10_loaders", fake_loaders)
+    monkeypatch.setattr(cli, "load_wrapper", lambda path, **kw: "MODEL")
+    monkeypatch.setattr(cli, "stage2_train_exits", fake_stage2)
+    monkeypatch.setattr(cli, "save_wrapper", lambda model, path: None)
+
+    model_path = tmp_path / "in.pth"
+    model_path.write_text("x")
+    out = tmp_path / "out.pth"
+    runner = CliRunner()
+
+    r1 = runner.invoke(
+        cli.main,
+        [
+            "train",
+            "exits",
+            "--model",
+            str(model_path),
+            "--batch-size",
+            "32",
+            "--epochs",
+            "1",
+            "--validate",
+            "--output",
+            str(out),
+        ],
+    )
+    assert r1.exit_code == 0, r1.output
+    assert captured["val_loader"] is sentinel_val
+    assert captured["val_batch_size"] == 32
+
+    r2 = runner.invoke(
+        cli.main,
+        [
+            "train",
+            "exits",
+            "--model",
+            str(model_path),
+            "--epochs",
+            "1",
+            "--no-validate",
+            "--output",
+            str(out),
+        ],
+    )
+    assert r2.exit_code == 0, r2.output
+    assert captured["val_loader"] is None
+
+
 def test_wrap_creates_checkpoint(tmp_path):
     runner = CliRunner()
     out = tmp_path / "m.pth"

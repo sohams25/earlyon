@@ -7,17 +7,13 @@ inverted-residual blocks, accessed via dotted paths ``features.3`` and
 
 from __future__ import annotations
 
-import torch
 import torch.nn as nn
 from torchvision.models import mobilenet_v2
 
 from earlyon.core.exit_head import EarlyExitHead
 from earlyon.core.types import EarlyExitConfig, ExitPoint
 from earlyon.core.wrappers import EarlyExitWrapper
-
-
-def _identity(x: torch.Tensor) -> torch.Tensor:
-    return x
+from earlyon.models._common import identity
 
 
 def mobilenetv2_ee(num_classes: int, pretrained: bool = True) -> EarlyExitWrapper:
@@ -39,4 +35,4 @@ def mobilenetv2_ee(num_classes: int, pretrained: bool = True) -> EarlyExitWrappe
         confidence_thresholds=[0.85, 0.80],
         loss_weights=[0.2, 0.3, 0.5],
     )
-    return EarlyExitWrapper(backbone, heads, _identity, cfg)
+    return EarlyExitWrapper(backbone, heads, identity, cfg)

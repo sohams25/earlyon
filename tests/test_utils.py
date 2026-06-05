@@ -47,6 +47,15 @@ def test_cifar10_loaders_val_and_test_are_batch_size_1(_patched_cifar):
     assert test.batch_size == 1
 
 
+def test_cifar10_loaders_honors_val_batch_size(_patched_cifar):
+    """val_batch_size lets training-time validation be batched while the default
+    (1) preserves the single-sample contract calibrate/analyze rely on."""
+    _train, val_default, _t = cifar10_loaders(image_size=8, num_workers=0)
+    assert val_default.batch_size == 1
+    _train, val_batched, _t = cifar10_loaders(image_size=8, num_workers=0, val_batch_size=16)
+    assert val_batched.batch_size == 16
+
+
 def test_cifar10_loaders_val_split_partitions_train(_patched_cifar):
     """val_split carves a disjoint slice off the training set; train+val sizes
     must sum to the full training set and not overlap."""

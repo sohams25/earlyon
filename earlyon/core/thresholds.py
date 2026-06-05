@@ -21,9 +21,8 @@ import torch
 from torch.utils.data import DataLoader
 
 from earlyon.core.temperature import fit_temperature as _fit_temperature
+from earlyon.core.types import Batch
 from earlyon.core.wrappers import EarlyExitWrapper
-
-_Batch = tuple[torch.Tensor, torch.Tensor]
 
 
 @dataclass
@@ -45,7 +44,7 @@ DEFAULT_ENTROPY_FRACTIONS: tuple[float, ...] = (0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0
 
 
 def _evaluate(
-    model: EarlyExitWrapper, loader: DataLoader[_Batch], device: str
+    model: EarlyExitWrapper, loader: DataLoader[Batch], device: str
 ) -> tuple[float, float]:
     correct = 0
     total = 0
@@ -65,7 +64,7 @@ def _evaluate(
 
 
 def _collect_final_logits(
-    model: EarlyExitWrapper, loader: DataLoader[_Batch], device: str
+    model: EarlyExitWrapper, loader: DataLoader[Batch], device: str
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Run ``loader`` through the wrapper in training mode and harvest the
     final classifier's logits + targets. Training mode never fires an exit (the
@@ -88,12 +87,12 @@ def _collect_final_logits(
 
 def calibrate_thresholds(
     model: EarlyExitWrapper,
-    val_loader: DataLoader[_Batch],
+    val_loader: DataLoader[Batch],
     target_accuracy_drop: float = 0.01,
     grid: tuple[float, ...] | None = None,
     device: str = "cpu",
     fit_temperature: bool = False,
-    temperature_loader: DataLoader[_Batch] | None = None,
+    temperature_loader: DataLoader[Batch] | None = None,
 ) -> CalibrationResult:
     """Find the most aggressive thresholds that keep accuracy within target.
 

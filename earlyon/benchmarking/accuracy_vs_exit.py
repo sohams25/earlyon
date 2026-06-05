@@ -8,9 +8,8 @@ from dataclasses import dataclass
 import torch
 from torch.utils.data import DataLoader
 
+from earlyon.core.types import Batch, exit_label
 from earlyon.core.wrappers import EarlyExitWrapper
-
-_Batch = tuple[torch.Tensor, torch.Tensor]
 
 
 @dataclass
@@ -24,7 +23,7 @@ class AccuracyReport:
 
 def evaluate(
     model: EarlyExitWrapper,
-    loader: DataLoader[_Batch],
+    loader: DataLoader[Batch],
     device: str = "cpu",
     class_names: list[str] | None = None,
 ) -> AccuracyReport:
@@ -41,9 +40,6 @@ def evaluate(
     exit_correct: dict[str, int] = defaultdict(int)
     class_exits: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
-    def label(idx: int) -> str:
-        return "final" if idx == -1 else f"exit_{idx}"
-
     with torch.no_grad():
         for images, targets in loader:
             images = images.to(device)
@@ -56,7 +52,7 @@ def evaluate(
                 correct += int(ok)
                 total += 1
                 comp_used_sum += result.computation_used
-                key = label(result.exit_taken)
+                key = exit_label(result.exit_taken)
                 exit_counts[key] += 1
                 if ok:
                     exit_correct[key] += 1

@@ -8,6 +8,7 @@ from typing import Tuple
 import torch
 from torch.utils.data import DataLoader, Subset
 
+from earlyon.core.types import Batch
 from earlyon.core.wrappers import EarlyExitWrapper
 from earlyon.models import (
     cifar_resnet_ee,
@@ -17,7 +18,6 @@ from earlyon.models import (
     resnet50_ee,
 )
 
-_Batch = tuple[torch.Tensor, torch.Tensor]
 _CIFAR_PREFIX = "cifar_resnet"
 
 FACTORIES = {
@@ -132,13 +132,18 @@ def cifar10_loaders(
     image_size: int = 224,
     num_workers: int = 2,
     val_split: float = 0.1,
-) -> Tuple[DataLoader[_Batch], DataLoader[_Batch], DataLoader[_Batch]]:
+    val_batch_size: int = 1,
+) -> Tuple[DataLoader[Batch], DataLoader[Batch], DataLoader[Batch]]:
     """Return (train, val, test) DataLoaders for CIFAR-10.
 
     Images are upsampled to ``image_size`` so torchvision ImageNet-pretrained
     backbones work without modification. For honest benchmarking on CIFAR
     natively you'd want a CIFAR-specific ResNet variant; v0.1 prioritizes
     the pip-install story.
+
+    ``val_batch_size`` defaults to 1 (single-sample routing, as calibrate/analyze
+    require); pass a larger value for fast batched validation during training.
+    The test loader is always batch_size=1 for routing evaluation.
     """
     import torchvision
     from torchvision import transforms
@@ -181,7 +186,7 @@ def cifar10_loaders(
     )
     val_loader = DataLoader(
         Subset(val_full, val_idx),
-        batch_size=1,
+        batch_size=val_batch_size,
         shuffle=False,
         num_workers=num_workers,
         pin_memory=True,
