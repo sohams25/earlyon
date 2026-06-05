@@ -42,9 +42,10 @@ result.confidence        # how sure it was when it left
 ### 1 · Wrap a model you already use
 
 One call turns a stock torchvision backbone into an early-exit network. ResNet,
-MobileNetV2, EfficientNet, or a CIFAR-native ResNet — the heads attach via
-forward hooks, so **no backbone forward is rewritten** and your weights load
-unchanged.
+MobileNetV2, EfficientNet, a CIFAR-native ResNet, or **ViT** — CNNs *and*
+transformers — and `custom_ee` wraps **any** `nn.Module`, auto-inferring the
+exit widths. The heads attach via forward hooks, so **no backbone forward is
+rewritten** and your weights load unchanged.
 
 ### 2 · Train without changing your recipe
 
@@ -147,13 +148,27 @@ result.per_sample_confidence   # tensor (N,)
 | `mobilenetv2_ee` | torchvision MobileNetV2 | 2 (`features.3`, `features.10`) |
 | `efficientnet_b0_ee` | torchvision EfficientNet-B0 | 2 (`features.3`, `features.5`) |
 | `cifar_resnet_ee` | CIFAR-native ResNet (He et al. 2015) | 3 — 3×3 stem, no maxpool, native 32×32 |
+| `vit_b_16_ee` | torchvision ViT-B/16 (transformer) | 2 (after encoder blocks 3 & 9) |
 
 ```python
-from earlyon.models import resnet18_ee, efficientnet_b0_ee, cifar_resnet_ee
+from earlyon.models import resnet18_ee, vit_b_16_ee, cifar_resnet_ee
 
 m1 = resnet18_ee(num_classes=10)
-m2 = efficientnet_b0_ee(num_classes=100)
+m2 = vit_b_16_ee(num_classes=100)                # transformer, token-pooled exits
 m3 = cifar_resnet_ee(num_classes=10, depth=20)   # 6n+2 depth, no upsampling
+```
+
+### Wrap any model
+
+`custom_ee` attaches exits to **any** `nn.Module` at named layers and
+auto-infers each exit's width from one dry-run forward — CNN (4D) or transformer
+(3D token) features both work:
+
+```python
+from earlyon.models import custom_ee
+
+# `backbone` must already return (B, num_classes) logits
+model = custom_ee(backbone, exit_layers=["layer2", "layer3"], num_classes=10)
 ```
 
 ## Routing policies

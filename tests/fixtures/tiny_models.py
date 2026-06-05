@@ -42,3 +42,24 @@ class TinyBackbone(nn.Module):
 
 
 STAGE_CHANNELS = {"stage1": 16, "stage2": 32, "stage3": 64, "stage4": 128}
+
+
+class TinyTokenBackbone(nn.Module):
+    """Tiny transformer-style backbone whose ``block0``/``block1`` emit token
+    sequences ``(B, N, D)`` — used to exercise the 3D early-exit path without the
+    cost of a real ViT. ``forward`` returns ``(B, num_classes)`` logits.
+    """
+
+    def __init__(self, num_classes: int = 10, dim: int = 32, n_tokens: int = 5) -> None:
+        super().__init__()
+        self.dim = dim
+        self.n_tokens = n_tokens
+        self.embed = nn.Linear(3 * 32 * 32, dim)
+        self.block0 = nn.TransformerEncoderLayer(dim, nhead=4, batch_first=True)
+        self.block1 = nn.TransformerEncoderLayer(dim, nhead=4, batch_first=True)
+        self.head = nn.Linear(dim, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        tokens = self.embed(x.flatten(1)).unsqueeze(1).repeat(1, self.n_tokens, 1)
+        tokens = self.block1(self.block0(tokens))
+        return self.head(tokens.mean(dim=1))

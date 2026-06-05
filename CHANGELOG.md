@@ -5,6 +5,17 @@ format follows [keep a changelog](https://keepachangelog.com/en/1.1.0/).
 ## unreleased
 
 ### added
+- **transformer support**: `vit_b_16_ee` wraps torchvision ViT-B/16 with two
+  early exits (after encoder blocks 3 and 9). `EarlyExitHead` now accepts 3D
+  token features ``(B, N, D)`` (CLS or mean pooling) and 2D vectors in addition
+  to 4D conv maps — earlyon is no longer CNN-only.
+- `custom_ee(backbone, exit_layers, num_classes)`: wrap **any** `nn.Module` with
+  early exits at named submodules, auto-inferring each exit's feature width from
+  a single dry-run forward. Fills the previously-documented-but-missing
+  custom-model entry point.
+- `vit_b_16` is a recognized CLI/`build_model` backbone (round-trips like the
+  other factories); `custom` models raise a clear error in `build_model` since
+  an arbitrary backbone can't be reconstructed from a string.
 - the three trainers now use ``val_loader``: when supplied they compute
   per-epoch validation loss/accuracy and report them via
   ``TrainStepLog.val_loss``/``val_accuracy`` (previously the parameter was

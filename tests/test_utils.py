@@ -77,3 +77,17 @@ def test_build_model_known_backbone_constructs_wrapper():
     model = build_model("resnet18", num_classes=10, pretrained=False)
     assert model.config.backbone == "resnet18"
     assert model.config.num_classes == 10
+
+
+def test_build_model_rejects_custom_backbone():
+    """custom_ee models can't be reconstructed from a string — build_model must
+    raise a clear NotImplementedError, not the generic 'unknown backbone'."""
+    with pytest.raises(NotImplementedError, match="custom_ee"):
+        build_model("custom", num_classes=10)
+
+
+def test_build_model_constructs_vit():
+    """vit_b_16 is a recognized FACTORIES backbone (the CLI relies on this)."""
+    model = build_model("vit_b_16", num_classes=10, pretrained=False)
+    assert model.config.backbone == "vit_b_16"
+    assert len(model.config.exit_points) == 2
