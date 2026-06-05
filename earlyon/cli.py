@@ -23,7 +23,7 @@ from earlyon.training import (
 )
 from earlyon.utils import build_model, cifar10_loaders, load_wrapper, save_wrapper
 
-BACKBONES = ["resnet18", "resnet50", "mobilenetv2", "efficientnet_b0"]
+BACKBONES = ["resnet18", "resnet50", "mobilenetv2", "efficientnet_b0", "vit_b_16"]
 
 
 def _device(name: str) -> str:

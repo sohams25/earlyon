@@ -56,6 +56,28 @@ def per_layer_flops(
             for name, mod in backbone.named_modules()
             if name and len(list(mod.children())) == 0
         ]
+        leaf_pos = {leaf: i for i, leaf in enumerate(ordered_leaves)}
+
+        # fvcore sometimes attributes FLOPs to a NON-leaf module rather than its
+        # leaves (e.g. nn.MultiheadAttention in a ViT block reports its FLOPs on
+        # the attention module, with its out_proj leaf showing 0). The leaf walk
+        # alone would drop those. Recover each non-leaf module's "self" FLOPs
+        # (its own count minus its direct children's) and attribute them to the
+        # position where the module finishes (its last descendant leaf). For pure
+        # CNNs every non-leaf self-count is 0, so this is a no-op there.
+        nonleaf_self: list[tuple[int, int]] = []
+        for name, mod in backbone.named_modules():
+            children = list(mod.named_children())
+            if not name or not children:
+                continue
+            desc_positions = [leaf_pos[lf] for lf in ordered_leaves if lf.startswith(name + ".")]
+            if not desc_positions:
+                continue
+            own = int(by_module.get(name, 0))
+            child_sum = sum(int(by_module.get(f"{name}.{cn}", 0)) for cn, _ in children)
+            self_flops = own - child_sum
+            if self_flops > 0:
+                nonleaf_self.append((max(desc_positions), self_flops))
 
         # The "end" of an exit at layer L is the last leaf whose name belongs to
         # L (equals L or is nested under it). Anything past that point hasn't run
@@ -73,6 +95,7 @@ def per_layer_flops(
                 cumulative[layer] = (list(layer_names).index(layer) + 1) / (n + 1)
                 continue
             running = sum(int(by_module.get(ordered_leaves[i], 0)) for i in range(last_idx + 1))
+            running += sum(flops for pos, flops in nonleaf_self if pos <= last_idx)
             ratio = running / total
             if ratio > 1.05:
                 # latent overcount: either fvcore.total() underreports for

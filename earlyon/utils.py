@@ -16,6 +16,7 @@ from earlyon.models import (
     mobilenetv2_ee,
     resnet18_ee,
     resnet50_ee,
+    vit_b_16_ee,
 )
 
 _CIFAR_PREFIX = "cifar_resnet"
@@ -25,10 +26,19 @@ FACTORIES = {
     "resnet50": resnet50_ee,
     "mobilenetv2": mobilenetv2_ee,
     "efficientnet_b0": efficientnet_b0_ee,
+    "vit_b_16": vit_b_16_ee,
 }
 
 
 def build_model(backbone: str, num_classes: int, pretrained: bool = True) -> EarlyExitWrapper:
+    # custom_ee models can't be reconstructed from a string — fail loudly rather
+    # than with a misleading "unknown backbone".
+    if backbone == "custom":
+        raise NotImplementedError(
+            "custom_ee models are not round-trippable via build_model/load_wrapper: "
+            "rebuild the backbone, re-wrap with custom_ee(...), then load the saved "
+            "state_dict yourself"
+        )
     # cifar_resnet_ee records its depth in the backbone string (e.g.
     # "cifar_resnet20"); reconstruct the architecture from that so save/load
     # round-trips. Without this, any cifar_resnet checkpoint is unloadable.
