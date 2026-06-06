@@ -5,6 +5,11 @@ format follows [keep a changelog](https://keepachangelog.com/en/1.1.0/).
 ## unreleased
 
 ### added
+- **ONNX export**: `export_to_onnx` / `earlyon export` write a portable static
+  multi-output graph (one output per exit plus the final classifier). Routing
+  stays at runtime — the graph computes every exit and the caller picks the
+  first confident one. Works for both conv and transformer exit heads; verified
+  against onnxruntime. (`onnxruntime` added to the `dev` extra for testing.)
 - **transformer support**: `vit_b_16_ee` wraps torchvision ViT-B/16 with two
   early exits (after encoder blocks 3 and 9). `EarlyExitHead` now accepts 3D
   token features ``(B, N, D)`` (CLS or mean pooling) and 2D vectors in addition
