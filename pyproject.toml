@@ -38,7 +38,10 @@ dev = [
     "isort>=5.12",
     "ruff>=0.1.0",
     "mypy>=1.0",
+    "onnx>=1.14",  # required by export_to_onnx (legacy exporter loads it)
+    "onnxruntime>=1.16",  # verifies exported ONNX graphs in tests
 ]
+onnx = ["onnx>=1.14"]
 
 [project.urls]
 Homepage = "https://github.com/sohams25/earlyon"

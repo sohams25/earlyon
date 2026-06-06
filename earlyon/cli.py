@@ -288,5 +288,26 @@ def analyze(model_path: str, dataset: str, device: str) -> None:
     )
 
 
+@main.command()
+@click.option("--model", "model_path", required=True, type=click.Path(exists=True))
+@click.option("--output", required=True, type=click.Path())
+@click.option("--input-size", default=224, type=int)
+@click.option("--opset", default=17, type=int)
+@click.option("--dynamic-batch/--no-dynamic-batch", default=True)
+def export(model_path: str, output: str, input_size: int, opset: int, dynamic_batch: bool) -> None:
+    """Export all exits as a static multi-output ONNX graph (routing at runtime)."""
+    from earlyon.onnx import export_to_onnx
+
+    model = load_wrapper(model_path)
+    names = export_to_onnx(
+        model,
+        output,
+        input_shape=(1, 3, input_size, input_size),
+        opset=opset,
+        dynamic_batch=dynamic_batch,
+    )
+    click.echo(f"wrote {output} (input 1x3x{input_size}x{input_size}, outputs: {', '.join(names)})")
+
+
 if __name__ == "__main__":
     main()

@@ -212,6 +212,7 @@ earlyon calibrate --model ee.pth --target-drop 0.01 --output calibrated.pth
 earlyon benchmark --model calibrated.pth --device cuda --runs 500
 earlyon profile   --model calibrated.pth --runs 200      # Jetson power + thermal
 earlyon analyze   --model calibrated.pth                 # per-exit accuracy + distribution
+earlyon export    --model calibrated.pth --output model.onnx   # static multi-exit ONNX graph
 ```
 
 ## How it works
@@ -233,8 +234,10 @@ earlyon analyze   --model calibrated.pth                 # per-exit accuracy + d
   `forward_inference_batched(x)` for per-batch routing.
 - **No `torch.compile`** on the inference path — the conditional control flow is
   incompatible; the wrapper raises a clear error. Compile the raw backbone.
-- **ONNX export not yet supported** — torch 2.x's exporter rejects the dynamic
-  control flow; deploy from PyTorch directly (tracked in `earlyon/onnx.py`).
+- **ONNX export is static-graph only** — `earlyon export` writes a portable graph
+  that computes *all* exits (routing applied at runtime by the caller); the
+  per-sample early-exit speedup itself isn't expressed in ONNX. Use the PyTorch
+  wrapper when you need the actual compute saving.
 - **No compute-budget routing yet** — confidence and entropy ship today.
 
 ## Acknowledgements

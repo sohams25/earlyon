@@ -521,8 +521,9 @@ earlyon profile --model calibrated.pth
 earlyon analyze --model calibrated.pth --dataset cifar10
 ```
 
-> ONNX export is not yet implemented (`earlyon/onnx.py` raises
-> `NotImplementedError`); there is no `earlyon export` command.
+> ONNX export writes a static multi-output graph (all exits; routing applied at
+> runtime) via `earlyon export` / `earlyon.onnx.export_to_onnx`. The dynamic
+> per-sample routing itself is not expressed in ONNX.
 
 ---
 
