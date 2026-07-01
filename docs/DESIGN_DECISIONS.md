@@ -67,6 +67,31 @@ construction. We chose temperature scaling over Platt/isotonic because it's
 the simplest method with a strong published track record on exactly this
 failure mode.
 
+## Compute budgets as a calibration objective, not a routing policy
+
+**Decision:** the compute-budget feature is
+`calibrate_thresholds_for_budget` — a second objective for the same greedy
+threshold search — rather than a third `routing_policy`.
+
+**Why:** a per-sample runtime budget is ill-posed in earlyon's setting. At
+inference time a single sample either meets an exit's criterion or it
+doesn't; "spend at most 80% FLOPs on this image" can only be enforced by
+forcing an exit regardless of confidence, which silently trades accuracy in
+exactly the way the library refuses to do. What deployments actually specify
+is an *average* cost ("this model gets X% of the GPU"), and averages are a
+property of thresholds over a data distribution — a calibration-time
+quantity. So budget reuses the routing machinery unchanged: confidence and
+entropy stay the only runtime policies, and the budget search just aims the
+same per-exit grid at a different constraint (compute ≤ target, maximize
+accuracy) instead of (accuracy drop ≤ target, minimize compute).
+
+**Honesty requirement:** a budget can be unattainable — if the earliest exit
+sits at 40% of FLOPs, no thresholds reach a 0.2 target. The search warns and
+returns `budget_met=False` with the least-compute configuration found, never
+a silently missed target. And because it is measured on the calibration set,
+the guarantee is average-case over that distribution, which the README's
+limitations section says out loud.
+
 ## Entropy routing alongside confidence
 
 **Decision:** ship two routing policies: max-softmax confidence (default) and

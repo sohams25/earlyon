@@ -20,6 +20,14 @@ def test_cli_help_lists_commands():
         assert cmd in result.output
 
 
+def test_calibrate_exposes_target_compute_option():
+    runner = CliRunner()
+    result = runner.invoke(main, ["calibrate", "--help"])
+    assert result.exit_code == 0
+    assert "--target-compute" in result.output
+    assert "--target-drop" in result.output
+
+
 def test_train_subcommands_exist():
     runner = CliRunner()
     result = runner.invoke(main, ["train", "--help"])

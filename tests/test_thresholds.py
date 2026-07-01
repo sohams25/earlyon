@@ -272,6 +272,138 @@ def test_confidence_calibration_reports_policy():
     assert result.policy == "confidence"
 
 
+# ---------------- budget calibration ----------------
+
+
+def _saturate_head(model, name: str) -> None:
+    """Make exit `name` always fire: huge constant logit for class 0 gives
+    softmax max ~1.0 (confidence policy) and entropy ~0.0 (entropy policy)."""
+    with torch.no_grad():
+        model.exit_heads[name].classifier[-1].bias.zero_()
+        model.exit_heads[name].classifier[-1].bias[0] = 1e3
+
+
+def _flatten_head(model, name: str) -> None:
+    """Make exit `name` never fire under the default grids: zero weights and
+    bias give all-zero logits, i.e. a uniform softmax (confidence 0.1 for 10
+    classes, entropy = ln 10)."""
+    with torch.no_grad():
+        model.exit_heads[name].classifier[-1].weight.zero_()
+        model.exit_heads[name].classifier[-1].bias.zero_()
+
+
+def test_budget_calibration_meets_attainable_budget():
+    """With a saturated first exit, any threshold fires it, so a generous
+    compute budget must be met — and met at the earliest exit, leaving later
+    exits disabled."""
+    from earlyon.core.thresholds import calibrate_thresholds_for_budget
+
+    model = _build()
+    _saturate_head(model, "e0")
+    x = torch.randn(16, 3, 32, 32)
+    y = torch.randint(0, 10, (16,))
+    loader = DataLoader(TensorDataset(x, y), batch_size=4)
+
+    result = calibrate_thresholds_for_budget(model, loader, target_computation=0.99, device="cpu")
+
+    assert result.budget_met is True
+    assert result.avg_computation_used <= 0.99
+    assert len(result.thresholds) == 2
+    assert model.config.confidence_thresholds == result.thresholds
+    # budget was met at exit 0; exit 1 must stay disabled (no-exit value 1.0)
+    assert result.thresholds[1] == 1.0
+    assert result.target_computation == 0.99
+
+
+def test_budget_calibration_unattainable_budget_warns_and_flags():
+    """When no threshold combination can reach the budget (uniform heads never
+    fire), the function must warn, set budget_met=False, and leave the
+    never-helping exits disabled rather than aggressive."""
+    from earlyon.core.thresholds import calibrate_thresholds_for_budget
+
+    model = _build()
+    _flatten_head(model, "e0")
+    _flatten_head(model, "e1")
+    x = torch.randn(16, 3, 32, 32)
+    y = torch.randint(0, 10, (16,))
+    loader = DataLoader(TensorDataset(x, y), batch_size=4)
+
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        result = calibrate_thresholds_for_budget(
+            model, loader, target_computation=0.5, device="cpu"
+        )
+
+    assert result.budget_met is False
+    assert result.avg_computation_used == 1.0
+    # a threshold that never fires reduces nothing; both exits stay disabled
+    assert result.thresholds == [1.0, 1.0]
+    messages = [str(w.message) for w in captured if issubclass(w.category, UserWarning)]
+    assert any("target_computation" in m for m in messages), messages
+
+
+def test_budget_calibration_trivial_budget_keeps_exits_disabled():
+    """A budget of 1.0 is met by the plain backbone; no exit should be made
+    aggressive just because the machinery ran."""
+    from earlyon.core.thresholds import calibrate_thresholds_for_budget
+
+    model = _build()
+    _saturate_head(model, "e0")  # even a head that WOULD fire must stay disabled
+    x = torch.randn(16, 3, 32, 32)
+    y = torch.randint(0, 10, (16,))
+    loader = DataLoader(TensorDataset(x, y), batch_size=4)
+
+    result = calibrate_thresholds_for_budget(model, loader, target_computation=1.0, device="cpu")
+
+    assert result.budget_met is True
+    assert result.thresholds == [1.0, 1.0]
+    # NOT asserting avg_computation_used == 1.0: the routing hook fires on
+    # `confidence >= threshold`, so a float32-saturated head (confidence 1.0)
+    # still fires at the clamped disabled value 1.0 — the library's documented
+    # convention, shared with calibrate_thresholds. The budget contract is
+    # only comp <= target.
+    assert result.avg_computation_used <= 1.0
+
+
+def test_budget_calibration_validates_target():
+    import pytest
+
+    from earlyon.core.thresholds import calibrate_thresholds_for_budget
+
+    model = _build()
+    x = torch.randn(8, 3, 32, 32)
+    y = torch.randint(0, 10, (8,))
+    loader = DataLoader(TensorDataset(x, y), batch_size=4)
+
+    for bad in (0.0, -0.2, 1.5):
+        with pytest.raises(ValueError, match="target_computation"):
+            calibrate_thresholds_for_budget(model, loader, target_computation=bad, device="cpu")
+
+
+def test_budget_calibration_entropy_policy_writes_entropy_field():
+    """Budget calibration must be policy-aware exactly like the accuracy
+    version: an entropy-routed model gets entropy_thresholds written and
+    confidence_thresholds left alone."""
+    from earlyon.core.thresholds import calibrate_thresholds_for_budget
+
+    model = _build_entropy()
+    _saturate_head(model, "e0")  # saturated head => entropy ~0, fires at any grid value
+    x = torch.randn(16, 3, 32, 32)
+    y = torch.randint(0, 10, (16,))
+    loader = DataLoader(TensorDataset(x, y), batch_size=4)
+
+    result = calibrate_thresholds_for_budget(model, loader, target_computation=0.99, device="cpu")
+
+    assert result.policy == "entropy"
+    assert result.budget_met is True
+    assert model.config.entropy_thresholds == result.thresholds
+    assert model.config.confidence_thresholds == [0.8, 0.8]
+    # exit 0 calibrated to a real grid value; exit 1 disabled at the entropy
+    # no-exit value 0.0
+    assert result.thresholds[0] > 0.0
+    assert result.thresholds[1] == 0.0
+
+
 def test_calibration_without_fit_temperature_leaves_config_unchanged():
     """The default path (fit_temperature=False) must not touch config.temperature."""
     model = _build()

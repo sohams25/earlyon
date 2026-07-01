@@ -5,6 +5,16 @@ format follows [keep a changelog](https://keepachangelog.com/en/1.1.0/).
 ## unreleased
 
 ### added
+- **compute-budget calibration**: `calibrate_thresholds_for_budget` /
+  `earlyon calibrate --target-compute` — the mirror of the accuracy-budget
+  search. State the average FLOPs fraction the deployed model may use (e.g.
+  `0.8`); the greedy sweep finds the thresholds that meet it with the least
+  accuracy loss. Policy-aware (confidence and entropy), supports the same
+  temperature-scaling options, and reports `budget_met=False` plus a
+  `UserWarning` when the budget is unattainable with the model's exit points
+  instead of silently missing it. `CalibrationResult` gains
+  `target_computation` and `budget_met` fields (defaulted, backward
+  compatible).
 - **ONNX export**: `export_to_onnx` / `earlyon export` write a portable static
   multi-output graph (one output per exit plus the final classifier). Routing
   stays at runtime — the graph computes every exit and the caller picks the

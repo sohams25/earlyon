@@ -15,7 +15,7 @@ from earlyon.benchmarking import (
     benchmark_wrapper,
     evaluate,
 )
-from earlyon.core.thresholds import calibrate_thresholds
+from earlyon.core.thresholds import calibrate_thresholds, calibrate_thresholds_for_budget
 from earlyon.training import (
     joint_train_backbone_and_exits,
     stage1_train_backbone,
@@ -168,19 +168,44 @@ def train_joint(
 @click.option("--model", "model_path", required=True, type=click.Path(exists=True))
 @click.option("--dataset", default="cifar10", type=click.Choice(["cifar10"]))
 @click.option("--target-drop", default=0.01, type=float)
+@click.option(
+    "--target-compute",
+    default=None,
+    type=float,
+    help="calibrate to a compute budget instead of an accuracy budget: the "
+    "average FLOPs fraction the deployed model may use, in (0, 1]. "
+    "Overrides --target-drop.",
+)
 @click.option("--device", default="auto")
 @click.option("--output", required=True, type=click.Path())
-def calibrate(model_path: str, dataset: str, target_drop: float, device: str, output: str) -> None:
+def calibrate(
+    model_path: str,
+    dataset: str,
+    target_drop: float,
+    target_compute: float | None,
+    device: str,
+    output: str,
+) -> None:
     """Greedy threshold calibration on the validation split."""
     dev = _device(device)
     _, val_loader, _ = cifar10_loaders(batch_size=1)
     model = load_wrapper(model_path)
-    result = calibrate_thresholds(model, val_loader, target_accuracy_drop=target_drop, device=dev)
+    if target_compute is not None:
+        result = calibrate_thresholds_for_budget(
+            model, val_loader, target_computation=target_compute, device=dev
+        )
+    else:
+        result = calibrate_thresholds(
+            model, val_loader, target_accuracy_drop=target_drop, device=dev
+        )
     save_wrapper(model, output)
-    click.echo(
+    line = (
         f"thresholds={result.thresholds} baseline_acc={result.baseline_accuracy:.4f} "
         f"final_acc={result.final_accuracy:.4f} avg_comp={result.avg_computation_used:.4f}"
     )
+    if target_compute is not None:
+        line += f" budget_met={result.budget_met}"
+    click.echo(line)
 
 
 @main.command()

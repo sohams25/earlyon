@@ -1,9 +1,16 @@
 """Greedy threshold calibration.
 
-For each exit (low-index to high-index), lower the confidence threshold
-through a fixed grid until the resulting accuracy drop on the validation set
-exceeds ``target_accuracy_drop``. The search is coordinate-descent, not
-joint-optimal; this is fast and gives consistently good results in practice.
+Two calibration modes share one greedy coordinate-descent search:
+
+* :func:`calibrate_thresholds` — accuracy budget. For each exit (low-index to
+  high-index), lower the threshold through a fixed grid until the resulting
+  accuracy drop on the validation set exceeds ``target_accuracy_drop``.
+* :func:`calibrate_thresholds_for_budget` — compute budget. For each exit,
+  keep the threshold that brings average compute within ``target_computation``
+  while losing the least accuracy; exits that cannot help stay disabled.
+
+The search is coordinate-descent, not joint-optimal; this is fast and gives
+consistently good results in practice.
 
 When ``fit_temperature=True``, post-hoc temperature scaling (Guo et al. 2017)
 is fit on a held-out set BEFORE the threshold search begins. The fitted
@@ -16,6 +23,7 @@ from __future__ import annotations
 import math
 import warnings
 from dataclasses import dataclass
+from typing import Callable
 
 import torch
 from torch.utils.data import DataLoader
@@ -33,6 +41,8 @@ class CalibrationResult:
     avg_computation_used: float
     fitted_temperature: float | None = None
     policy: str = "confidence"  # which routing policy the thresholds calibrate
+    target_computation: float | None = None  # set by budget calibration
+    budget_met: bool = True  # False when target_computation was unattainable
 
 
 # confidence grid: ordered conservative -> aggressive (lower threshold fires more)
@@ -85,6 +95,90 @@ def _collect_final_logits(
     return torch.cat(all_logits, dim=0), torch.cat(all_targets, dim=0)
 
 
+@dataclass(frozen=True)
+class _PolicySearch:
+    """Per-policy search setup. ``seed`` is a strictly non-firing value used
+    while measuring the baseline and untried exits — it must NEVER fire even on
+    a float32-saturated softmax (max prob == 1.0 / entropy == -0.0), or the
+    no-exit baseline would be corrupted. ``no_exit`` is the in-range "disabled"
+    value the seed is clamped back to in the result. ``more_aggressive`` decides
+    which passing threshold to keep (smaller for confidence, larger for
+    entropy)."""
+
+    field: str
+    seed: float
+    no_exit: float
+    grid: tuple[float, ...]
+    more_aggressive: Callable[[float, float], bool]
+
+
+def _policy_search(model: EarlyExitWrapper, grid: tuple[float, ...] | None) -> _PolicySearch:
+    policy = model.config.routing_policy
+    if policy == "confidence":
+        return _PolicySearch(
+            field="confidence_thresholds",
+            seed=2.0,  # softmax.max() <= 1.0, so confidence >= 2.0 can never fire
+            no_exit=1.0,  # documented "no early exit at this point" value
+            grid=DEFAULT_GRID if grid is None else grid,
+            more_aggressive=lambda new, cur: new < cur,
+        )
+    if policy == "entropy":
+        h_max = math.log(max(model.config.num_classes, 2))
+        if grid is None:
+            search_grid = tuple(round(f * h_max, 6) for f in DEFAULT_ENTROPY_FRACTIONS)
+        else:
+            if any(t < 0 or t > h_max + 1e-9 for t in grid):
+                raise ValueError(
+                    f"entropy grid values must lie in [0, ln(num_classes)] = "
+                    f"[0, {h_max:.4f}]; got {grid}"
+                )
+            search_grid = grid
+        return _PolicySearch(
+            field="entropy_thresholds",
+            seed=-1.0,  # entropy >= 0, so H <= -1.0 can never fire (even at -0.0)
+            no_exit=0.0,
+            grid=search_grid,
+            more_aggressive=lambda new, cur: new > cur,
+        )
+    raise ValueError(  # pragma: no cover - EarlyExitConfig already validates the policy
+        f"unsupported routing_policy {policy!r}"
+    )
+
+
+def _maybe_fit_temperature(
+    model: EarlyExitWrapper,
+    fit_temperature: bool,
+    temperature_loader: DataLoader[Batch] | None,
+    val_loader: DataLoader[Batch],
+    device: str,
+) -> float | None:
+    if not fit_temperature:
+        return None
+    if temperature_loader is None:
+        warnings.warn(
+            "fit_temperature=True without a separate temperature_loader: "
+            "val_loader is being reused for both temperature fit and "
+            "threshold search, which leaks the calibration estimate. Pass "
+            "a held-out temperature_loader for a clean fit.",
+            UserWarning,
+            stacklevel=3,
+        )
+        temperature_loader = val_loader
+
+    # Training-mode collection never fires exits (the hook only appends in
+    # training mode), so thresholds are irrelevant here; only the
+    # temperature must be neutral while harvesting uncalibrated logits.
+    original_temp = model.config.temperature
+    model.config.temperature = 1.0
+    try:
+        logits, targets = _collect_final_logits(model, temperature_loader, device)
+    finally:
+        model.config.temperature = original_temp
+    fitted = _fit_temperature(logits.cpu(), targets.cpu())
+    model.config.temperature = fitted
+    return fitted
+
+
 def calibrate_thresholds(
     model: EarlyExitWrapper,
     val_loader: DataLoader[Batch],
@@ -126,90 +220,34 @@ def calibrate_thresholds(
     """
     model = model.to(device)
     n = len(model.config.exit_points)
-    policy = model.config.routing_policy
-
-    # Per-policy search setup. ``seed`` is a strictly non-firing value used while
-    # measuring the baseline and untried exits — it must NEVER fire even on a
-    # float32-saturated softmax (max prob == 1.0 / entropy == -0.0), or the
-    # no-exit baseline would be corrupted. ``no_exit`` is the in-range "disabled"
-    # value the seed is clamped back to in the result. ``more_aggressive`` decides
-    # which passing threshold to keep (smaller for confidence, larger for entropy).
-    if policy == "confidence":
-        field = "confidence_thresholds"
-        seed = 2.0  # softmax.max() <= 1.0, so confidence >= 2.0 can never fire
-        no_exit = 1.0  # documented "no early exit at this point" value
-        search_grid = DEFAULT_GRID if grid is None else grid
-
-        def more_aggressive(new: float, cur: float) -> bool:
-            return new < cur
-
-    elif policy == "entropy":
-        field = "entropy_thresholds"
-        seed = -1.0  # entropy >= 0, so H <= -1.0 can never fire (even at -0.0)
-        no_exit = 0.0
-        h_max = math.log(max(model.config.num_classes, 2))
-        if grid is None:
-            search_grid = tuple(round(f * h_max, 6) for f in DEFAULT_ENTROPY_FRACTIONS)
-        else:
-            if any(t < 0 or t > h_max + 1e-9 for t in grid):
-                raise ValueError(
-                    f"entropy grid values must lie in [0, ln(num_classes)] = "
-                    f"[0, {h_max:.4f}]; got {grid}"
-                )
-            search_grid = grid
-
-        def more_aggressive(new: float, cur: float) -> bool:
-            return new > cur
-
-    else:  # pragma: no cover - EarlyExitConfig already validates the policy
-        raise ValueError(f"unsupported routing_policy {policy!r}")
-
-    fitted_t: float | None = None
-    if fit_temperature:
-        if temperature_loader is None:
-            warnings.warn(
-                "fit_temperature=True without a separate temperature_loader: "
-                "val_loader is being reused for both temperature fit and "
-                "threshold search, which leaks the calibration estimate. Pass "
-                "a held-out temperature_loader for a clean fit.",
-                UserWarning,
-                stacklevel=2,
-            )
-            temperature_loader = val_loader
-
-        # Training-mode collection never fires exits (the hook only appends in
-        # training mode), so thresholds are irrelevant here; only the
-        # temperature must be neutral while harvesting uncalibrated logits.
-        original_temp = model.config.temperature
-        model.config.temperature = 1.0
-        try:
-            logits, targets = _collect_final_logits(model, temperature_loader, device)
-        finally:
-            model.config.temperature = original_temp
-        fitted_t = _fit_temperature(logits.cpu(), targets.cpu())
-        model.config.temperature = fitted_t
+    search = _policy_search(model, grid)
+    fitted_t = _maybe_fit_temperature(
+        model, fit_temperature, temperature_loader, val_loader, device
+    )
 
     # start fully conservative -- no exits will fire
-    best = [seed] * n
-    setattr(model.config, field, list(best))
+    best = [search.seed] * n
+    setattr(model.config, search.field, list(best))
     baseline_acc, _ = _evaluate(model, val_loader, device)
 
     # iterate the full grid per exit. an early break would miss thresholds
     # that pass after a transient miss (val accuracy isn't monotone in threshold
     # on small sets). keep the most aggressive passing threshold seen.
     for exit_idx in range(n):
-        for thr in search_grid:
+        for thr in search.grid:
             trial = list(best)
             trial[exit_idx] = thr
-            setattr(model.config, field, list(trial))
+            setattr(model.config, search.field, list(trial))
             acc, _ = _evaluate(model, val_loader, device)
-            if baseline_acc - acc <= target_accuracy_drop and more_aggressive(thr, best[exit_idx]):
+            if baseline_acc - acc <= target_accuracy_drop and search.more_aggressive(
+                thr, best[exit_idx]
+            ):
                 best[exit_idx] = thr
 
     # clamp any exit that never found a passing threshold from the non-firing
     # search seed back to the in-range disabled value.
-    best = [no_exit if t == seed else t for t in best]
-    setattr(model.config, field, list(best))
+    best = [search.no_exit if t == search.seed else t for t in best]
+    setattr(model.config, search.field, list(best))
     final_acc, avg_comp = _evaluate(model, val_loader, device)
     return CalibrationResult(
         thresholds=best,
@@ -217,5 +255,106 @@ def calibrate_thresholds(
         final_accuracy=final_acc,
         avg_computation_used=avg_comp,
         fitted_temperature=fitted_t,
-        policy=policy,
+        policy=model.config.routing_policy,
+    )
+
+
+def calibrate_thresholds_for_budget(
+    model: EarlyExitWrapper,
+    val_loader: DataLoader[Batch],
+    target_computation: float = 0.8,
+    grid: tuple[float, ...] | None = None,
+    device: str = "cpu",
+    fit_temperature: bool = False,
+    temperature_loader: DataLoader[Batch] | None = None,
+) -> CalibrationResult:
+    """Find thresholds that meet a compute budget while losing the least accuracy.
+
+    The mirror image of :func:`calibrate_thresholds`: there you state an
+    accuracy budget and get the biggest compute saving inside it; here you
+    state a compute budget — ``target_computation``, the average fraction of
+    the backbone's FLOPs the deployed model may run per sample, in ``(0, 1]``
+    — and the search keeps validation accuracy as high as it can while
+    meeting it.
+
+    Greedy per exit, earliest first (early exits save the most compute). At
+    each exit, among grid values whose average compute is within budget, the
+    one with the highest validation accuracy is kept and the search stops;
+    later exits stay disabled. If no value at this exit reaches the budget,
+    the value with the largest strict compute reduction is kept and the search
+    moves to the next exit; an exit that reduces nothing stays disabled. If
+    the budget is unattainable after all exits, a ``UserWarning`` is emitted
+    and the result carries ``budget_met=False`` with the least-compute
+    configuration found (which may be the plain backbone).
+
+    Routing-policy aware exactly like :func:`calibrate_thresholds`, and the
+    ``grid`` / ``fit_temperature`` / ``temperature_loader`` parameters behave
+    identically.
+    """
+    if not 0.0 < target_computation <= 1.0:
+        raise ValueError(f"target_computation must be in (0, 1], got {target_computation}")
+    model = model.to(device)
+    n = len(model.config.exit_points)
+    search = _policy_search(model, grid)
+    fitted_t = _maybe_fit_temperature(
+        model, fit_temperature, temperature_loader, val_loader, device
+    )
+
+    # start fully conservative -- no exits fire, compute is the full backbone
+    best = [search.seed] * n
+    setattr(model.config, search.field, list(best))
+    baseline_acc, current_comp = _evaluate(model, val_loader, device)
+    budget_met = current_comp <= target_computation
+
+    for exit_idx in range(n):
+        if budget_met:
+            break  # budget already met; leave the remaining exits disabled
+        # within one exit: the best accuracy among budget-meeting grid values,
+        # and the largest strict compute reduction as the fallback when none
+        # qualifies
+        within: tuple[float, float, float] | None = None  # (acc, thr, comp)
+        fallback: tuple[float, float] | None = None  # (comp, thr)
+        for thr in search.grid:
+            trial = list(best)
+            trial[exit_idx] = thr
+            setattr(model.config, search.field, list(trial))
+            acc, comp = _evaluate(model, val_loader, device)
+            if comp <= target_computation and (within is None or acc > within[0]):
+                within = (acc, thr, comp)
+            if comp < current_comp and (fallback is None or comp < fallback[0]):
+                fallback = (comp, thr)
+        if within is not None:
+            best[exit_idx] = within[1]
+            current_comp = within[2]
+            budget_met = True
+        elif fallback is not None:
+            best[exit_idx] = fallback[1]
+            current_comp = fallback[0]
+        # else: no grid value at this exit reduced compute; leave it at the
+        # seed so it clamps to the disabled value below
+
+    if not budget_met:
+        warnings.warn(
+            f"target_computation={target_computation} is unattainable: the "
+            f"least-compute configuration found still uses {current_comp:.4f} "
+            "of the backbone's FLOPs on the validation set. Returning it with "
+            "budget_met=False; consider earlier exit points or a larger budget.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    # clamp exits still at the non-firing search seed to the in-range
+    # disabled value.
+    best = [search.no_exit if t == search.seed else t for t in best]
+    setattr(model.config, search.field, list(best))
+    final_acc, avg_comp = _evaluate(model, val_loader, device)
+    return CalibrationResult(
+        thresholds=best,
+        baseline_accuracy=baseline_acc,
+        final_accuracy=final_acc,
+        avg_computation_used=avg_comp,
+        fitted_temperature=fitted_t,
+        policy=model.config.routing_policy,
+        target_computation=target_computation,
+        budget_met=budget_met,
     )

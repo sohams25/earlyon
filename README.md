@@ -110,10 +110,13 @@ training.
 
 ### 3 · Dial the speed/accuracy tradeoff
 
-The exits are governed by per-head thresholds. `calibrate_thresholds` greedily
-finds the most aggressive thresholds that hold accuracy within a target drop you
-choose (e.g. 1%), with optional temperature scaling to fix the over-confidence
-modern CNNs are known for. Route on **confidence** or on **entropy**; both ship.
+The exits are governed by per-head thresholds, and you calibrate them from
+either direction: `calibrate_thresholds` takes an accuracy budget ("stay
+within 1% of baseline") and finds the biggest compute saving inside it;
+`calibrate_thresholds_for_budget` takes a compute budget ("average ≤ 80% of
+FLOPs") and loses the least accuracy meeting it. Optional temperature scaling
+fixes the over-confidence modern CNNs are known for. Route on **confidence**
+or on **entropy**; both ship.
 
 ### 4 · Prove it on real hardware
 
@@ -231,6 +234,21 @@ result = calibrate_thresholds(model, val_loader, target_accuracy_drop=0.01,
 print(result.policy, result.thresholds, result.fitted_temperature)
 ```
 
+Or calibrate to a compute budget instead of an accuracy budget — state the
+average FLOPs fraction the deployed model may use, and the search keeps
+accuracy as high as it can inside it:
+
+```python
+from earlyon.core.thresholds import calibrate_thresholds_for_budget
+
+result = calibrate_thresholds_for_budget(model, val_loader, target_computation=0.8)
+print(result.budget_met, result.thresholds, result.avg_computation_used)
+```
+
+If the budget can't be reached with the model's exit points, you get a
+`UserWarning` and `budget_met=False` with the least-compute configuration
+found — never a silently missed target.
+
 ## Training strategies
 
 | Strategy | Call | When |
@@ -249,6 +267,7 @@ earlyon train exits --model backbone.pth --dataset cifar10 --epochs 20 --output 
 earlyon train joint --model backbone.pth --dataset cifar10 --epochs 30 --output joint.pth
 
 earlyon calibrate --model ee.pth --target-drop 0.01 --output calibrated.pth
+earlyon calibrate --model ee.pth --target-compute 0.8 --output budget.pth   # compute budget
 earlyon benchmark --model calibrated.pth --device cuda --runs 500
 earlyon profile   --model calibrated.pth --runs 200      # Jetson power + thermal
 earlyon analyze   --model calibrated.pth                 # per-exit accuracy + distribution
@@ -281,7 +300,9 @@ The reasoning behind each of these choices is written up in
   that computes *all* exits (routing applied at runtime by the caller); the
   per-sample early-exit speedup itself isn't expressed in ONNX. Use the PyTorch
   wrapper when you need the actual compute saving.
-- **No compute-budget routing yet.** Confidence and entropy ship today.
+- **Compute budgets are average-case.** `calibrate_thresholds_for_budget`
+  meets the budget as an average over the calibration distribution; nothing
+  enforces a per-sample FLOPs cap at runtime.
 
 ## Contributing
 
