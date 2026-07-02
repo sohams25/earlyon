@@ -6,7 +6,7 @@ format follows [keep a changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### added
 - **compute-budget calibration**: `calibrate_thresholds_for_budget` /
-  `earlyon calibrate --target-compute` — the mirror of the accuracy-budget
+  `earlyon calibrate --target-compute`, the mirror of the accuracy-budget
   search. State the average FLOPs fraction the deployed model may use (e.g.
   `0.8`); the greedy sweep finds the thresholds that meet it with the least
   accuracy loss. Policy-aware (confidence and entropy), supports the same
@@ -17,13 +17,13 @@ format follows [keep a changelog](https://keepachangelog.com/en/1.1.0/).
   compatible).
 - **ONNX export**: `export_to_onnx` / `earlyon export` write a portable static
   multi-output graph (one output per exit plus the final classifier). Routing
-  stays at runtime — the graph computes every exit and the caller picks the
+  stays at runtime: the graph computes every exit and the caller picks the
   first confident one. Works for both conv and transformer exit heads; verified
   against onnxruntime. (`onnxruntime` added to the `dev` extra for testing.)
 - **transformer support**: `vit_b_16_ee` wraps torchvision ViT-B/16 with two
   early exits (after encoder blocks 3 and 9). `EarlyExitHead` now accepts 3D
   token features ``(B, N, D)`` (CLS or mean pooling) and 2D vectors in addition
-  to 4D conv maps — earlyon is no longer CNN-only.
+  to 4D conv maps, so earlyon is no longer CNN-only.
 - `custom_ee(backbone, exit_layers, num_classes)`: wrap **any** `nn.Module` with
   early exits at named submodules, auto-inferring each exit's feature width from
   a single dry-run forward. Fills the previously-documented-but-missing
@@ -71,12 +71,12 @@ format follows [keep a changelog](https://keepachangelog.com/en/1.1.0/).
   falls below a per-exit threshold, alongside the existing confidence policy
 - `joint_train_backbone_and_exits` + `earlyon train joint` CLI: train backbone
   and exit heads together as an alternative to two-stage training
-- `cifar_resnet_ee` — CIFAR-native ResNet (He et al. 2015, 6n+2 depth) for 32x32
+- `cifar_resnet_ee`: CIFAR-native ResNet (He et al. 2015, 6n+2 depth) for 32x32
   input without upsampling
 - `efficientnet_b0_ee` backbone factory and `--backbone efficientnet_b0` CLI option
-- `forward_inference_batched` — conservative per-batch routing (all samples in a
+- `forward_inference_batched`: conservative per-batch routing (all samples in a
   batch exit together at the earliest layer every sample clears)
-- `benchmark_wrapper_on_loader` — real-data throughput on samples from a
+- `benchmark_wrapper_on_loader`: real-data throughput on samples from a
   DataLoader, the honest input-distribution signal vs. random-noise input
 - `fit_temperature` opt-in in `calibrate_thresholds` (post-hoc temperature
   scaling fit before the threshold search)

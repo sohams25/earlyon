@@ -31,8 +31,8 @@ Joint end-to-end training ships too, but as the opt-in
 **Cost:** two-stage leaves some accuracy on the table versus joint training,
 because the backbone never learns features that serve the early heads. That's
 the documented tradeoff; when you have the budget and want peak numbers, use
-joint. *Revisitable* if evidence shows joint training is robust enough to be
-the default.
+joint. *Revisitable* if evidence shows joint training holds up well enough to
+be the default.
 
 ## Greedy per-exit threshold calibration
 
