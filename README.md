@@ -11,23 +11,14 @@
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-ECEDF1?style=flat-square&labelColor=0a0a0e"></a>
 </p>
 
-<p align="center">
-  <b>Skip the layers your images don't need.</b><br>
-  <a href="#results-on-cifar-10">Results</a> ·
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#models">Models</a> ·
-  <a href="#cli">CLI</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#limitations">Limitations</a>
-</p>
+> `earlyon` adds early exits to PyTorch CV models: small classifier heads
+> partway through the network, so easy images stop computing once an exit is
+> confident and only hard images run every layer. Works on your existing
+> backbone via forward hooks. No rewrite, weights load unchanged.
 
-A deep network runs every layer for every image, even the obvious ones. A
-frontal close-up of a car and a blurry, half-occluded bird both pay the full
-forward pass. earlyon attaches lightweight classifier heads partway through the
-network so confident predictions leave early and only the hard inputs go the
-distance. Eight years of research show 1.3–2.5× less compute at single-sample
-edge inference with the same accuracy. earlyon is the part you `pip install`
-instead of re-implementing per paper.
+---
+
+## The 30-second version
 
 ```bash
 pip install earlyon
@@ -37,150 +28,126 @@ pip install earlyon
 import torch
 from earlyon.models import resnet50_ee
 
+# pretrained=True fetches ResNet50 ImageNet weights once (~100 MB)
 model = resnet50_ee(num_classes=10, pretrained=True).eval()
 result = model(torch.randn(1, 3, 224, 224), mode="inference")
 
-result.exit_taken        # which head fired (-1 = full network)
-result.computation_used  # fraction of FLOPs actually run
-result.confidence        # how sure it was when it left
+result.exit_taken        # which head answered; -1 means the full network ran
+result.computation_used  # fraction of the network's FLOPs actually spent
+result.confidence        # softmax confidence at the point it answered
 ```
 
-```mermaid
-%%{init: {'theme':'base','themeVariables':{'background':'#0A0E16','primaryColor':'#13203A','primaryTextColor':'#F4F6FB','primaryBorderColor':'#33507F','lineColor':'#33507F','textColor':'#9FB0CC','fontFamily':'ui-monospace, monospace'}}}%%
-flowchart LR
-    x([image]) --> L1[layer 1] --> c0{confident?}
-    c0 -- yes --> e0([exit 0 · ~12% FLOPs]):::hit
-    c0 -- no --> L2[layer 2] --> c1{confident?}
-    c1 -- yes --> e1([exit 1 · ~40% FLOPs]):::hit
-    c1 -- no --> L3[layer 3] --> c2{confident?}
-    c2 -- yes --> e2([exit 2]):::hit
-    c2 -- no --> F([final classifier · 100% FLOPs])
-    classDef hit fill:#1A1206,stroke:#FF6B35,color:#FFC24B;
-```
+<p align="center">
+  <img src="assets/demo.svg" alt="earlyon demo: an easy image exits at the first head using 12% of the FLOPs, a hard image runs the whole network" width="100%">
+</p>
 
----
+Why this exists: the research goes back to BranchyNet in 2016, and a 2024 ACM
+survey (10.1145/3698767) covers eight years of results showing 1.3 to 2.5×
+compute savings at single-sample edge inference. But each paper ships custom
+code for one architecture. I wanted the `pip install` version.
 
 ## Results on CIFAR-10
 
 Trained on an RTX 4050 Laptop GPU (6 GB) from ImageNet-pretrained weights:
-3–4 stage-1 epochs + 3–4 stage-2 epochs, thresholds calibrated to a 1% target
-accuracy drop.
+3–4 epochs for the backbone, 3–4 for the exit heads, thresholds calibrated to
+a 1% accuracy budget.
 
 | Model       | Test Acc | Baseline Acc | Avg FLOPs Used | % exited early |
 |-------------|---------:|-------------:|---------------:|---------------:|
 | ResNet18    |   94.42% |       96.32% |         89.88% |          35.3% |
-| ResNet50    |   95.88% |       97.60% |     **81.42%** |      **58.2%** |
+| ResNet50    |   95.88% |       97.60% |         81.42% |          58.2% |
 | MobileNetV2 |   93.31% |       95.08% |         93.90% |           8.5% |
 
-> **Avg FLOPs Used is the honest signal**: the work skipped on real test
-> images, not a theoretical ceiling. ResNet50 drops ~19% of its compute for a
-> 1.7% accuracy cost, and **58% of images never reach `layer4`.** Wall-clock
-> speedup depends on hardware and input mix; see the
-> [latency appendix](#appendix-wall-clock-latency).
+Avg FLOPs Used is measured on the real test set, per image. It is the number
+I'd want to see, so it's the one the tool reports. For ResNet50 that means
+~19% of the compute gone for a 1.7% accuracy cost, with 58% of images never
+reaching `layer4`. Wall-clock speedup is hardware- and input-dependent; see
+the [latency appendix](#appendix-wall-clock-latency) before quoting one.
 
-Where it wins, plainly: big models with expensive deep layers on a mix of
-easy and hard inputs (ResNet50 ✅). Where it doesn't: small models whose
-backbone is already cheap. MobileNetV2 on CIFAR-10 sends only 8% of images
-out early, so the wrapper does ~94% of the work anyway. earlyon tells you
-which case you're in.
+The MobileNetV2 row is a loss, and it's in the table anyway. An
+already-compressed backbone leaves little for early exit to skim: only 8.5%
+of images leave early, so the wrapper still does ~94% of the work. Rule of
+thumb from these runs: the deeper and heavier the backbone, the more there is
+to save.
 
-Reproduce: `python scripts/run_benchmarks.py` (train + bench) ·
-`python scripts/re_evaluate.py` (from checkpoints). Raw numbers in
+Reproduce with `python scripts/run_benchmarks.py` (trains and benchmarks) or
+`python scripts/re_evaluate.py` (from checkpoints). Raw numbers live in
 [`docs/benchmarks.json`](docs/benchmarks.json).
-
----
-
-## What you get
-
-### 1 · Wrap a model you already use
-
-One call turns a stock torchvision backbone into an early-exit network. ResNet,
-MobileNetV2, EfficientNet, a CIFAR-native ResNet, or **ViT**, CNNs *and*
-transformers, and `custom_ee` wraps **any** `nn.Module`, auto-inferring the
-exit widths. The heads attach via forward hooks, so **no backbone forward is
-rewritten** and your weights load unchanged.
-
-### 2 · Train without changing your recipe
-
-Two-stage is the default: train the backbone exactly as you do today, then
-freeze it (parameters *and* BatchNorm stats) and train only the small exit
-heads. No gradient conflict, and you can bolt exits onto an already-trained
-model. Want peak accuracy instead? One call swaps in end-to-end **joint**
-training.
-
-### 3 · Dial the speed/accuracy tradeoff
-
-The exits are governed by per-head thresholds, and you calibrate them from
-either direction: `calibrate_thresholds` takes an accuracy budget ("stay
-within 1% of baseline") and finds the biggest compute saving inside it;
-`calibrate_thresholds_for_budget` takes a compute budget ("average ≤ 80% of
-FLOPs") and loses the least accuracy meeting it. Optional temperature scaling
-fixes the over-confidence modern CNNs are known for. Route on **confidence**
-or on **entropy**; both ship.
-
-### 4 · Prove it on real hardware
-
-Honesty is the whole point. The benchmark suite reports **average FLOPs
-skipped on real test images**, plus throughput, latency percentiles with
-proper CUDA sync, the per-class exit distribution, and NVIDIA Jetson
-power/thermal profiling via `tegrastats`.
 
 ## How it compares
 
-Early-exit papers publish custom code for one architecture. Compression
-techniques shrink the model for every input. earlyon keeps the full model and
-spends compute per image:
+Compression makes the model cheaper for every input. Early exit spends
+compute per input. They stack.
 
-|  | earlyon | Per-paper research code | Pruning / distillation |
+|  | earlyon | per-paper research code | pruning / distillation |
 |---|---|---|---|
-| Works on your existing backbone | ✅ hooks, no rewrite | ❌ one architecture each | ⚠️ retrain required |
-| Adapts compute per input | ✅ easy images exit early | ✅ (that one model) | ❌ fixed cost for all |
-| Full accuracy still reachable | ✅ hard inputs run everything | ✅ | ❌ capacity is gone |
-| `pip install` + tests + CI | ✅ | ❌ | ✅ (mature tools) |
-| Composable with compression | ✅ wrap a pruned model too | — | — |
+| works on your existing backbone | yes, via hooks | one architecture each | retrain required |
+| adapts compute per input | yes | yes, for that model | no, fixed cost |
+| full accuracy still reachable | yes, hard inputs run everything | yes | no, capacity is gone |
+| pip install, tests, CI | yes | rarely | yes, mature tools |
 
-Pruning and distillation are complementary, not rivals: wrap a compressed
-backbone and stack both savings.
-
----
+If you already prune or distill, wrap the compressed model and take both
+savings.
 
 ## Quick start
 
-Install, wrap, train the heads, calibrate, measure:
+This block runs as-is on CPU (synthetic data standing in for your loaders):
 
 ```python
 import torch
-from earlyon.models import resnet50_ee
+from torch.utils.data import DataLoader, TensorDataset
+
 from earlyon.core.thresholds import calibrate_thresholds
+from earlyon.models import resnet18_ee
 
-model = resnet50_ee(num_classes=10, pretrained=True)
+model = resnet18_ee(num_classes=10, pretrained=False)
 
-# 1. train the backbone exactly as you normally would (or start pretrained)
-# 2. freeze it and train the exit heads — see examples/01_train_resnet50_cifar10.py
+# your validation split goes here
+val = DataLoader(
+    TensorDataset(torch.randn(64, 3, 224, 224), torch.randint(0, 10, (64,))),
+    batch_size=8,
+)
 
-# 3. pick thresholds that hold accuracy within 1% of baseline
-calibrate_thresholds(model, val_loader, target_accuracy_drop=0.01)
+# 1. train the backbone with your usual recipe, or start from a checkpoint
+# 2. freeze it and train the small exit heads
+#    (both steps: examples/01_train_resnet50_cifar10.py)
+
+# 3. pick thresholds that keep accuracy within 1% of the full network
+calibrate_thresholds(model, val, target_accuracy_drop=0.01)
 
 # 4. deploy
 model.eval()
-result = model(image, mode="inference")
+result = model(torch.randn(1, 3, 224, 224), mode="inference")
 print(result.exit_taken, result.confidence, result.computation_used)
 ```
 
-The inference path runs under `torch.inference_mode()` for you; the returned
-prediction carries no autograd graph, so it's safe in a server loop.
+The inference path runs under `torch.inference_mode()` internally, so the
+returned prediction carries no autograd graph and is safe in a server loop.
 
-Batched routing (all samples in a batch exit together at the earliest layer
-every sample clears):
+You can also calibrate from the other direction: state a compute budget and
+keep as much accuracy as it allows.
 
 ```python
-result = model.forward_inference_batched(x_batch)   # (N, 3, H, W)
-result.exit_taken              # the layer everyone left at
-result.per_sample_confidence   # tensor (N,)
+from earlyon.core.thresholds import calibrate_thresholds_for_budget
+
+result = calibrate_thresholds_for_budget(model, val, target_computation=0.8)
+result.budget_met            # False (plus a warning) if 0.8 is unreachable
+result.avg_computation_used  # measured on the calibration set
 ```
 
-Worked end-to-end scripts live in [`examples/`](examples/), including
-[Jetson deployment](examples/02_jetson_deployment.py).
+An unreachable budget warns and reports `budget_met=False` rather than
+pretending. Budgets hold as an average over the calibration distribution, not
+per sample; the [limitations](#limitations) section spells that out.
+
+Batched inference routes conservatively: the whole batch exits at the
+earliest layer every sample clears, so the hardest sample sets the pace.
+
+```python
+x_batch = torch.randn(16, 3, 224, 224)
+result = model.forward_inference_batched(x_batch)
+result.exit_taken              # the layer the whole batch left at
+result.per_sample_confidence   # tensor of shape (16,)
+```
 
 ## Models
 
@@ -190,139 +157,117 @@ Worked end-to-end scripts live in [`examples/`](examples/), including
 | `resnet50_ee` | torchvision ResNet50 | 3 (after `layer1`, `layer2`, `layer3`) |
 | `mobilenetv2_ee` | torchvision MobileNetV2 | 2 (`features.3`, `features.10`) |
 | `efficientnet_b0_ee` | torchvision EfficientNet-B0 | 2 (`features.3`, `features.5`) |
-| `cifar_resnet_ee` | CIFAR-native ResNet (He et al. 2015) | 3 — 3×3 stem, no maxpool, native 32×32 |
-| `vit_b_16_ee` | torchvision ViT-B/16 (transformer) | 2 (after encoder blocks 3 & 9) |
+| `cifar_resnet_ee` | CIFAR-native ResNet (He et al. 2015) | 3 (3×3 stem, no maxpool, native 32×32) |
+| `vit_b_16_ee` | torchvision ViT-B/16 | 2 (after encoder blocks 3 and 9) |
 
-```python
-from earlyon.models import resnet18_ee, vit_b_16_ee, cifar_resnet_ee
-
-m1 = resnet18_ee(num_classes=10)
-m2 = vit_b_16_ee(num_classes=100)                # transformer, token-pooled exits
-m3 = cifar_resnet_ee(num_classes=10, depth=20)   # 6n+2 depth, no upsampling
-```
-
-### Wrap any model
-
-`custom_ee` attaches exits to **any** `nn.Module` at named layers and
-auto-infers each exit's width from one dry-run forward. CNN (4D) and
-transformer (3D token) features both work:
+Anything else, wrap it yourself. `custom_ee` attaches exits at named layers
+of any `nn.Module` and infers each head's width from one dry-run forward.
+Conv (4D) and transformer token (3D) features both work; the backbone must
+already return `(B, num_classes)` logits.
 
 ```python
 from earlyon.models import custom_ee
 
-# `backbone` must already return (B, num_classes) logits
 model = custom_ee(backbone, exit_layers=["layer2", "layer3"], num_classes=10)
 ```
 
-## Routing policies
+## Routing and training
 
-Set `routing_policy` on the config:
+Two routing policies ship. `"confidence"` (default) exits when
+`softmax(logits).max() >= threshold`; `"entropy"` exits when the softmax
+entropy drops below a threshold, which reads the whole distribution instead
+of just the top class. Calibration and `save_wrapper`/`load_wrapper` are
+policy-aware, so a calibrated entropy model reloads as one.
 
-- **`"confidence"`** (default) — exit when `softmax(logits).max() >= threshold`.
-- **`"entropy"`** — exit when `H(softmax(logits)) <= threshold` (low entropy =
-  high certainty).
-
-`calibrate_thresholds` is policy-aware; it calibrates whichever list the active
-policy reads, and `save_wrapper`/`load_wrapper` round-trip the policy and both
-threshold lists, so a calibrated entropy model reloads as an entropy model.
-
-```python
-from earlyon.core.thresholds import calibrate_thresholds
-
-result = calibrate_thresholds(model, val_loader, target_accuracy_drop=0.01,
-                              fit_temperature=True, temperature_loader=cal_loader)
-print(result.policy, result.thresholds, result.fitted_temperature)
-```
-
-Or calibrate to a compute budget instead of an accuracy budget — state the
-average FLOPs fraction the deployed model may use, and the search keeps
-accuracy as high as it can inside it:
-
-```python
-from earlyon.core.thresholds import calibrate_thresholds_for_budget
-
-result = calibrate_thresholds_for_budget(model, val_loader, target_computation=0.8)
-print(result.budget_met, result.thresholds, result.avg_computation_used)
-```
-
-If the budget can't be reached with the model's exit points, you get a
-`UserWarning` and `budget_met=False` with the least-compute configuration
-found — never a silently missed target.
-
-## Training strategies
-
-| Strategy | Call | When |
-|---|---|---|
-| **Two-stage** *(default)* | `stage1_train_backbone` → `stage2_train_exits` | Add exits to any model; no gradient conflict |
-| **Joint** | `joint_train_backbone_and_exits` | End-to-end, for peak accuracy with the compute budget |
+Training is two-stage by default: train the backbone exactly as you already
+do, freeze it (parameters and BatchNorm stats), then train the small heads
+for a few epochs. `joint_train_backbone_and_exits` does end-to-end training
+instead when you want the last bit of accuracy and have the budget.
+Temperature scaling (Guo et al. 2017) can be fit before calibration to fix
+the usual softmax over-confidence; pass `fit_temperature=True`.
 
 ## CLI
 
 ```bash
+# wrap a backbone (add --no-pretrained to skip the weight download)
 earlyon wrap --backbone resnet50 --num-classes 10 --output model.pth
+earlyon wrap --backbone cifar_resnet20 --num-classes 10 --output cifar.pth
 
+# two-stage training on CIFAR-10 (downloads the dataset on first run)
 earlyon train backbone --backbone resnet50 --num-classes 10 \
     --dataset cifar10 --epochs 90 --output backbone.pth
 earlyon train exits --model backbone.pth --dataset cifar10 --epochs 20 --output ee.pth
 earlyon train joint --model backbone.pth --dataset cifar10 --epochs 30 --output joint.pth
 
+# calibrate: accuracy budget, or compute budget
 earlyon calibrate --model ee.pth --target-drop 0.01 --output calibrated.pth
-earlyon calibrate --model ee.pth --target-compute 0.8 --output budget.pth   # compute budget
+earlyon calibrate --model ee.pth --target-compute 0.8 --output budget.pth
+
+# measure
 earlyon benchmark --model calibrated.pth --device cuda --runs 500
-earlyon profile   --model calibrated.pth --runs 200      # Jetson power + thermal
-earlyon analyze   --model calibrated.pth                 # per-exit accuracy + distribution
-earlyon export    --model calibrated.pth --output model.onnx   # static multi-exit ONNX graph
+earlyon profile   --model calibrated.pth --runs 200   # Jetson power + thermals
+earlyon analyze   --model calibrated.pth              # per-exit accuracy + distribution
+earlyon export    --model calibrated.pth --output model.onnx
 ```
 
 ## How it works
 
-1. **Forward hooks** attach exit heads at chosen layers; no backbone rewrite.
-2. **Routing** computes the policy's criterion at each exit; when it's met, a
-   sentinel exception short-circuits the rest of the backbone (the only reliable
-   way to skip downstream layers from inside a hook). The whole path runs under
-   `torch.inference_mode()`.
-3. **Training** is two-stage (freeze backbone + BN, train heads) or joint.
-4. **Temperature scaling** (Guo et al. 2017) is fit before calibration to undo
-   systematic over-confidence.
-5. **Calibration** sweeps a per-exit grid and keeps the most aggressive
-   threshold that holds accuracy within your target drop.
+1. Forward hooks attach the exit heads at the named layers, so the backbone
+   forward is never rewritten.
+2. At inference, each hook checks its policy's criterion. When one passes, a
+   sentinel exception short-circuits the rest of the backbone (the only
+   reliable way to stop an opaque `forward` from inside a hook).
+3. Training freezes the backbone and trains heads (two-stage), or trains
+   everything jointly.
+4. Temperature scaling is fit before calibration when requested.
+5. Calibration greedily sweeps a per-exit threshold grid against your
+   accuracy or compute budget.
 
-The reasoning behind each of these choices is written up in
+The reasoning for each choice, including the ugly parts, is in
 [`docs/DESIGN_DECISIONS.md`](docs/DESIGN_DECISIONS.md).
 
 ## Limitations
 
-- **Batch size 1** for `forward(mode="inference")`; use
-  `forward_inference_batched(x)` for per-batch routing.
-- **No `torch.compile`** on the inference path; the conditional control flow is
-  incompatible and the wrapper raises a clear error. Compile the raw backbone.
-- **ONNX export is static-graph only.** `earlyon export` writes a portable graph
-  that computes *all* exits (routing applied at runtime by the caller); the
-  per-sample early-exit speedup itself isn't expressed in ONNX. Use the PyTorch
-  wrapper when you need the actual compute saving.
-- **Compute budgets are average-case.** `calibrate_thresholds_for_budget`
-  meets the budget as an average over the calibration distribution; nothing
-  enforces a per-sample FLOPs cap at runtime.
+- `forward(mode="inference")` is batch-size 1. `forward_inference_batched`
+  handles batches, but conservatively (see above); masked per-sample routing
+  inside a batch is on the roadmap.
+- `torch.compile` cannot trace the routing control flow. The wrapper raises a
+  clear error instead of silently falling back; compile the raw backbone if
+  you need it.
+- ONNX export writes a static graph that computes every exit and leaves
+  routing to the caller. The per-sample compute saving only exists in the
+  PyTorch wrapper.
+- Compute budgets from `calibrate_thresholds_for_budget` hold as an average
+  over the calibration distribution. Nothing caps FLOPs per sample.
+- Benchmarks are CIFAR-10 on a laptop GPU. ImageNet-scale numbers and a real
+  Jetson table don't exist yet; treat any wall-clock claim accordingly.
+
+## Roadmap
+
+- ImageNet-scale benchmark runs, and a measured Jetson Orin table to replace
+  the "profile it yourself" answer.
+- Masked per-sample routing inside a batch (the v0.3 target).
+- Grow the backbone factory list as people ask; `custom_ee` covers the gap
+  meanwhile.
 
 ## Contributing
 
-Bug reports, backbone requests, and benchmark results from your hardware are
-all welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md); security reports go
-through [SECURITY.md](SECURITY.md).
+Bug reports and benchmark results from your hardware are welcome. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md); security issues go through
+[SECURITY.md](SECURITY.md).
 
 ## Used By
 
-Using earlyon in a project, product, or paper? Open a PR adding yourself here,
-or say hi in an issue. Early adopters shape the roadmap.
+Using earlyon in a project or paper? Open a PR adding yourself here.
 
 ## Citation
 
-If earlyon helps your research, cite it:
+If earlyon saves your model some FLOPs, a citation is welcome:
 
 ```bibtex
 @misc{earlyon,
   author       = {Soham},
-  title        = {earlyon: production-ready early-exit inference for PyTorch CV models},
+  title        = {earlyon: early-exit inference for PyTorch CV models},
   year         = {2026},
   publisher    = {GitHub},
   howpublished = {\url{https://github.com/sohams25/earlyon}},
@@ -333,15 +278,14 @@ If earlyon helps your research, cite it:
 ## Acknowledgements
 
 BranchyNet (Teerapittayanon et al. 2016) and the ACM 2024 early-exit survey
-(10.1145/3698767) for the ideas; torchvision (BSD) for the backbones; fvcore for
-FLOPs accounting. earlyon itself is MIT.
+(10.1145/3698767) for the ideas; torchvision (BSD) for the backbones; fvcore
+for FLOPs accounting. earlyon itself is MIT.
 
 ## Appendix: wall-clock latency
 
-Throughput here uses a random-noise input that can trigger spurious early exits,
-so treat it as a best-case upper bound. The honest signal is **Avg FLOPs Used**
-above, measured on the real test set. RTX 4050 Laptop GPU, batch 1, 224×224,
-50-iter warmup, 300 iters.
+Throughput below uses a random-noise input, which can trigger spurious early
+exits, so read it as a best-case bound rather than a claim. RTX 4050 Laptop
+GPU, batch 1, 224×224, 50-iteration warmup, 300 iterations.
 
 | Model       | Backbone p50 | Wrapper p50 (noise input) |
 |-------------|-------------:|--------------------------:|
