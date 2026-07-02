@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Tuple
 
@@ -63,6 +64,14 @@ def save_wrapper(model: EarlyExitWrapper, path: str | Path) -> None:
     them an entropy-routed model would silently reload as confidence-routed
     (the wrapper default), discarding the calibrated entropy thresholds.
     """
+    if model.config.backbone == "custom":
+        warnings.warn(
+            "saving a custom_ee model: load_wrapper cannot rebuild an arbitrary "
+            "backbone from this artifact. To restore it, reconstruct the backbone, "
+            "re-wrap with custom_ee(...), and load the saved state_dict manually.",
+            UserWarning,
+            stacklevel=2,
+        )
     payload = {
         "state_dict": model.state_dict(),
         "config": {

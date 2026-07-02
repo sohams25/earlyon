@@ -69,3 +69,16 @@ def test_entropy_threshold_length_validated():
             routing_policy="entropy",
             entropy_thresholds=[0.5],  # should be length 2
         )
+
+
+def test_config_rejects_num_classes_below_two():
+    """num_classes=1 makes softmax confidence identically 1.0, so every exit
+    fires at any threshold; num_classes<1 is nonsense. Both must raise."""
+    import pytest
+
+    from earlyon.core.types import EarlyExitConfig, ExitPoint
+
+    exits = [ExitPoint("e0", "stage1", 8)]
+    for bad in (1, 0, -3):
+        with pytest.raises(ValueError, match="num_classes"):
+            EarlyExitConfig(backbone="tiny", num_classes=bad, exit_points=exits)

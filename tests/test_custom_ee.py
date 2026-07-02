@@ -112,7 +112,9 @@ def test_custom_ee_rejects_empty_exit_layers():
 
 
 def test_custom_ee_rejects_unknown_layer_name():
-    with pytest.raises(AttributeError):
+    """Unknown layer names get the library's usual ValueError naming available
+    layers (was: torch's raw AttributeError)."""
+    with pytest.raises(ValueError, match="does_not_exist"):
         custom_ee(
             TinyBackbone(num_classes=10),
             ["does_not_exist"],
@@ -136,3 +138,11 @@ def test_custom_ee_rejects_non_tensor_layer_output():
 
     with pytest.raises(ValueError, match="not a Tensor"):
         custom_ee(TupleBackbone(), ["weird"], num_classes=10, input_shape=(1, 3, 8, 8))
+
+
+def test_custom_ee_bad_layer_name_raises_value_error_listing_layers():
+    """A typo'd exit layer must produce the library's usual clear ValueError
+    (naming some available layers), not torch's raw AttributeError."""
+    backbone = TinyBackbone(num_classes=10)
+    with pytest.raises(ValueError, match="stage1"):
+        custom_ee(backbone, ["stage_one_typo"], num_classes=10, input_shape=(1, 3, 32, 32))

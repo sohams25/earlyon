@@ -91,3 +91,32 @@ def test_build_model_constructs_vit():
     model = build_model("vit_b_16", num_classes=10, pretrained=False)
     assert model.config.backbone == "vit_b_16"
     assert len(model.config.exit_points) == 2
+
+
+def test_save_wrapper_warns_for_custom_backbone(tmp_path):
+    """custom_ee artifacts cannot be rebuilt by load_wrapper; the user must
+    hear that at SAVE time, not after training when the load fails."""
+    import warnings
+
+    import torch
+    from torch import nn
+
+    from earlyon.models import custom_ee
+    from earlyon.utils import save_wrapper
+
+    class Tiny(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.body = nn.Conv2d(3, 8, 3, padding=1)
+            self.head = nn.Linear(8, 10)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            feats = self.body(x)
+            return self.head(feats.mean(dim=(2, 3)))
+
+    model = custom_ee(Tiny(), ["body"], num_classes=10, input_shape=(1, 3, 16, 16))
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        save_wrapper(model, tmp_path / "m.pth")
+    messages = [str(w.message) for w in captured if issubclass(w.category, UserWarning)]
+    assert any("load_wrapper" in m for m in messages), messages

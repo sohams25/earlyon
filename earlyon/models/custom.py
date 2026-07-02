@@ -35,7 +35,7 @@ def _infer_feature_widths(
 
     Raises ``ValueError`` if a layer produces a non-Tensor or unsupported rank,
     ``RuntimeError`` if a layer is never visited during the forward pass, and
-    ``AttributeError`` (from ``get_submodule``) for an unresolvable layer name.
+    ``ValueError`` naming the available layers for an unresolvable layer name.
     Restores the backbone's prior train/eval mode on exit.
     """
     widths: dict[str, int] = {}
@@ -61,7 +61,14 @@ def _infer_feature_widths(
         return hook
 
     for name in layer_names:
-        module = backbone.get_submodule(name)  # AttributeError on bad name
+        try:
+            module = backbone.get_submodule(name)
+        except AttributeError:
+            available = [n for n, _ in backbone.named_modules() if n]
+            shown = ", ".join(available[:20]) + (", ..." if len(available) > 20 else "")
+            raise ValueError(
+                f"exit layer {name!r} does not exist on the backbone; " f"available layers: {shown}"
+            ) from None
         handles.append(module.register_forward_hook(_make_probe(name)))
 
     was_training = backbone.training

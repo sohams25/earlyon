@@ -24,6 +24,30 @@ from earlyon.training import (
 from earlyon.utils import build_model, cifar10_loaders, load_wrapper, save_wrapper
 
 BACKBONES = ["resnet18", "resnet50", "mobilenetv2", "efficientnet_b0", "vit_b_16"]
+_CIFAR_PREFIX = "cifar_resnet"
+
+
+def _backbone_arg(ctx: click.Context, param: click.Parameter, value: str) -> str:
+    """Accept the factory names plus 'cifar_resnet<depth>' (bare 'cifar_resnet'
+    maps to the factory default, depth 56). The depth rides in the name so the
+    saved config round-trips through build_model."""
+    if value in BACKBONES:
+        return value
+    if value == _CIFAR_PREFIX:
+        return f"{_CIFAR_PREFIX}56"
+    if value.startswith(_CIFAR_PREFIX) and value[len(_CIFAR_PREFIX) :].isdigit():
+        return value
+    raise click.BadParameter(
+        f"choose from {BACKBONES} or 'cifar_resnet<depth>' (e.g. cifar_resnet20)"
+    )
+
+
+def _target_compute_arg(
+    ctx: click.Context, param: click.Parameter, value: float | None
+) -> float | None:
+    if value is not None and not 0.0 < value <= 1.0:
+        raise click.BadParameter(f"must be in (0, 1], got {value}")
+    return value
 
 
 def _device(name: str) -> str:
@@ -41,7 +65,12 @@ def main() -> None:
 
 
 @main.command()
-@click.option("--backbone", required=True, type=click.Choice(BACKBONES))
+@click.option(
+    "--backbone",
+    required=True,
+    callback=_backbone_arg,
+    metavar="[resnet18|resnet50|mobilenetv2|efficientnet_b0|vit_b_16|cifar_resnet<depth>]",
+)
 @click.option("--num-classes", required=True, type=int)
 @click.option("--pretrained/--no-pretrained", default=True)
 @click.option("--output", "output", required=True, type=click.Path())
@@ -58,7 +87,12 @@ def train() -> None:
 
 
 @train.command("backbone")
-@click.option("--backbone", required=True, type=click.Choice(BACKBONES))
+@click.option(
+    "--backbone",
+    required=True,
+    callback=_backbone_arg,
+    metavar="[resnet18|resnet50|mobilenetv2|efficientnet_b0|vit_b_16|cifar_resnet<depth>]",
+)
 @click.option("--num-classes", required=True, type=int)
 @click.option("--dataset", default="cifar10", type=click.Choice(["cifar10"]))
 @click.option("--epochs", default=90, type=int)
@@ -172,6 +206,7 @@ def train_joint(
     "--target-compute",
     default=None,
     type=float,
+    callback=_target_compute_arg,
     help="calibrate to a compute budget instead of an accuracy budget: the "
     "average FLOPs fraction the deployed model may use, in (0, 1]. "
     "Overrides --target-drop.",

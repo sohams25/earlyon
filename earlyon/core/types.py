@@ -53,6 +53,10 @@ class EarlyExitConfig:
     temperature: float = 1.0
 
     def __post_init__(self) -> None:
+        if self.num_classes < 2:
+            # with a single class softmax confidence is identically 1.0, so
+            # every exit fires at any threshold <= 1.0 — routing is meaningless
+            raise ValueError(f"num_classes must be >= 2 (got {self.num_classes})")
         n_exits = len(self.exit_points)
         if not self.loss_weights:
             # equal weight across exits + final

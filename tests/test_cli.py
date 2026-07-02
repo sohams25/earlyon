@@ -329,3 +329,31 @@ def test_load_wrapper_rejects_mismatched_loss_weights(tmp_path):
 
     with pytest.raises(ValueError, match="loss_weights has length 2"):
         load_wrapper(path)
+
+
+def test_wrap_accepts_cifar_resnet_backbone(tmp_path):
+    """The CIFAR-native backbone from the README models table must be
+    wrappable from the CLI, with the depth encoded in the name."""
+    runner = CliRunner()
+    out = tmp_path / "m.pth"
+    result = runner.invoke(
+        main,
+        ["wrap", "--backbone", "cifar_resnet20", "--num-classes", "10", "--output", str(out)],
+    )
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+
+
+def test_calibrate_rejects_out_of_range_target_compute_cleanly(tmp_path):
+    """--target-compute outside (0, 1] must fail at option parsing with a
+    click error (exit code 2, no traceback), before any dataset is touched."""
+    dummy = tmp_path / "dummy.pth"
+    dummy.write_bytes(b"not a real checkpoint")
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["calibrate", "--model", str(dummy), "--target-compute", "1.5", "--output", "o.pth"],
+    )
+    assert result.exit_code == 2
+    assert "target-compute" in result.output or "target_compute" in result.output
+    assert "Traceback" not in result.output
