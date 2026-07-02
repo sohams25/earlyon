@@ -38,7 +38,27 @@ format follows [keep a changelog](https://keepachangelog.com/en/1.1.0/).
   flag, and a ``val_batch_size`` argument on ``cifar10_loaders`` for fast
   batched validation.
 
+### fixed
+- an empty custom `grid` passed to either calibrator now raises instead of
+  silently "calibrating" a model that never exits early.
+- `EarlyExitConfig` rejects `num_classes < 2` (softmax confidence over one
+  class is always 1.0, so routing degenerates).
+- `custom_ee` with a nonexistent exit layer raises a `ValueError` naming the
+  available layers instead of torch's raw `AttributeError`.
+- `save_wrapper` warns when saving a `custom_ee` model, at save time rather
+  than at the failed `load_wrapper` call after training.
+- the CLI accepts `--backbone cifar_resnet<depth>` (e.g. `cifar_resnet20`);
+  previously the CIFAR-native factory from the models table had no CLI path.
+- `earlyon calibrate --target-compute` values outside `(0, 1]` fail at option
+  parsing with a clean click error instead of a traceback (and before any
+  dataset download starts).
+
 ### changed
+- threshold calibration evaluates trials against cached exit logits (one
+  batched forward pass) instead of re-running the network per grid point at
+  batch size 1: ~25× faster on the README quick-start scenario (20.1s →
+  0.8s on CPU), byte-identical thresholds, equivalence against the real
+  routing path pinned by a test.
 - consolidated duplicated definitions: a single ``Batch`` alias and
   ``exit_label`` helper in ``earlyon.core.types``, and one ``identity`` final
   classifier in ``earlyon.models._common`` (were copy-pasted across 5 and 4

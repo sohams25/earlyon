@@ -130,13 +130,13 @@ def test_calibration_fit_temperature_runs_before_threshold_search():
     observed_temps: list[float] = []
     from earlyon.core import thresholds as thresholds_mod
 
-    original_eval = thresholds_mod._evaluate
+    original_eval = thresholds_mod._EvalCache.evaluate
 
-    def spy_eval(m, loader, device):
-        observed_temps.append(m.config.temperature)
-        return original_eval(m, loader, device)
+    def spy_eval(self):
+        observed_temps.append(self._model.config.temperature)
+        return original_eval(self)
 
-    thresholds_mod._evaluate = spy_eval
+    thresholds_mod._EvalCache.evaluate = spy_eval
     try:
         result = calibrate_thresholds(
             model,
@@ -147,11 +147,11 @@ def test_calibration_fit_temperature_runs_before_threshold_search():
             temperature_loader=val_loader,
         )
     finally:
-        thresholds_mod._evaluate = original_eval
+        thresholds_mod._EvalCache.evaluate = original_eval
 
-    # every _evaluate call (baseline + grid sweep + final) must have seen the
+    # every evaluate call (baseline + grid sweep + final) must have seen the
     # already-fitted temperature, proving the fit ran before the search.
-    assert observed_temps, "expected at least one _evaluate call"
+    assert observed_temps, "expected at least one evaluate call"
     assert all(
         t == result.fitted_temperature for t in observed_temps
     ), f"expected all temps == fitted {result.fitted_temperature}; got {observed_temps}"
@@ -420,3 +420,61 @@ def test_calibration_without_fit_temperature_leaves_config_unchanged():
     )
 
     assert model.config.temperature == 1.5
+
+
+def test_calibration_rejects_empty_grid():
+    """An empty custom grid means nothing is searched: calibration 'succeeds'
+    with all exits disabled and the user ships a model that never exits. Both
+    calibrators must refuse it."""
+    import pytest
+
+    from earlyon.core.thresholds import calibrate_thresholds_for_budget
+
+    model = _build()
+    x = torch.randn(8, 3, 32, 32)
+    y = torch.randint(0, 10, (8,))
+    loader = DataLoader(TensorDataset(x, y), batch_size=4)
+
+    with pytest.raises(ValueError, match="grid"):
+        calibrate_thresholds(model, loader, grid=(), device="cpu")
+    with pytest.raises(ValueError, match="grid"):
+        calibrate_thresholds_for_budget(model, loader, grid=(), device="cpu")
+
+
+def test_eval_cache_matches_real_router_exactly():
+    """The vectorized calibration evaluator must agree with the real
+    per-sample routing path on accuracy AND avg compute, for both policies,
+    across threshold settings, temperatures, and adversarial heads. This is
+    the guard that lets calibration run one batched pass instead of one full
+    validation pass per grid point."""
+    from earlyon.core.thresholds import _EvalCache, _evaluate_with_router
+
+    torch.manual_seed(7)
+    for build, policy in ((_build, "confidence"), (_build_entropy, "entropy")):
+        model = build()
+        # one saturated head + one normal head exercises the knife edges
+        with torch.no_grad():
+            model.exit_heads["e0"].classifier[-1].bias.zero_()
+            model.exit_heads["e0"].classifier[-1].bias[0] = 1e3
+        x = torch.randn(40, 3, 32, 32)
+        y = torch.randint(0, 10, (40,))
+        loader = DataLoader(TensorDataset(x, y), batch_size=8)
+        cache = _EvalCache(model, loader, "cpu")
+
+        settings = [
+            ([2.0, 2.0], [-1.0, -1.0], 1.0),  # non-firing search seeds
+            ([1.0, 1.0], [0.0, 0.0], 1.0),  # disabled values (saturated head fires)
+            ([0.8, 0.5], [0.5, 1.2], 1.0),  # mid-grid
+            ([0.5, 0.5], [2.0, 2.0], 2.5),  # aggressive + temperature
+        ]
+        for conf_thr, ent_thr, temp in settings:
+            model.config.confidence_thresholds = list(conf_thr)
+            model.config.entropy_thresholds = list(ent_thr)
+            model.config.temperature = temp
+            real = _evaluate_with_router(model, loader, "cpu")
+            sim = cache.evaluate()
+            # accuracy must match exactly (integer counts); avg compute may
+            # differ by float summation order, so allow one ulp of slack
+            assert sim[0] == real[0] and abs(sim[1] - real[1]) < 1e-12, (
+                f"policy={policy} conf={conf_thr} ent={ent_thr} T={temp}: " f"sim={sim} real={real}"
+            )

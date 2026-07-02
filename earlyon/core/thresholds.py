@@ -10,7 +10,10 @@ Two calibration modes share one greedy coordinate-descent search:
   while losing the least accuracy; exits that cannot help stay disabled.
 
 The search is coordinate-descent, not joint-optimal; this is fast and gives
-consistently good results in practice.
+consistently good results in practice. Trials are evaluated against
+:class:`_EvalCache` — one batched forward pass collects every head's logits,
+and each threshold setting is then simulated vectorially, so the network runs
+once instead of once per grid point.
 
 When ``fit_temperature=True``, post-hoc temperature scaling (Guo et al. 2017)
 is fit on a held-out set BEFORE the threshold search begins. The fitted
@@ -30,7 +33,7 @@ from torch.utils.data import DataLoader
 
 from earlyon.core.temperature import fit_temperature as _fit_temperature
 from earlyon.core.types import Batch
-from earlyon.core.wrappers import EarlyExitWrapper
+from earlyon.core.wrappers import EarlyExitWrapper, _safe_temperature
 
 
 @dataclass
@@ -53,9 +56,13 @@ DEFAULT_GRID: tuple[float, ...] = (0.99, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.6, 0
 DEFAULT_ENTROPY_FRACTIONS: tuple[float, ...] = (0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7)
 
 
-def _evaluate(
+def _evaluate_with_router(
     model: EarlyExitWrapper, loader: DataLoader[Batch], device: str
 ) -> tuple[float, float]:
+    """Ground truth: route every sample through the real inference path.
+
+    Kept as the oracle that pins :class:`_EvalCache` correctness in the test
+    suite; calibration itself uses the cache."""
     correct = 0
     total = 0
     comp = 0.0
@@ -71,6 +78,70 @@ def _evaluate(
                 comp += result.computation_used
                 total += 1
     return correct / max(total, 1), comp / max(total, 1)
+
+
+class _EvalCache:
+    """One batched training-mode pass caches every head's logits; threshold
+    trials are then simulated against the cache instead of re-running the
+    network.
+
+    The simulation reproduces the router's math exactly: softmax in float32
+    (as the hook computes it), criterion comparison in float64 (as the hook's
+    ``.item()`` produces), first firing exit claims the sample. A test pins
+    equivalence against :func:`_evaluate_with_router`.
+
+    Memory: stores ``(n_exits + 1) x N x num_classes`` logits on CPU, which is
+    fine for calibration-sized validation sets.
+
+    ponytail: turns grid search from O(exits * grid) full validation passes at
+    batch size 1 into one batched pass plus cheap tensor math.
+    """
+
+    def __init__(self, model: EarlyExitWrapper, loader: DataLoader[Batch], device: str) -> None:
+        self._model = model
+        per_head: list[list[torch.Tensor]] = []
+        targets: list[torch.Tensor] = []
+        model.eval()
+        with torch.no_grad():
+            for images, tgt in loader:
+                outputs = model(images.to(device), mode="training")
+                if not per_head:
+                    per_head = [[] for _ in outputs]
+                for idx, logits in enumerate(outputs):
+                    per_head[idx].append(logits.detach().cpu())
+                targets.append(tgt.cpu())
+        if targets:
+            self._heads = [torch.cat(chunks) for chunks in per_head]
+            self._targets = torch.cat(targets)
+        else:  # empty loader: preserve the old 0.0/0.0 contract
+            self._heads = []
+            self._targets = torch.empty(0, dtype=torch.long)
+        exit_flops = [model._flops_at[ep.layer_name] for ep in model.config.exit_points]
+        self._flops = torch.tensor(exit_flops + [1.0], dtype=torch.float64)
+
+    def evaluate(self) -> tuple[float, float]:
+        """(accuracy, avg computation used) under the model's current config."""
+        if self._targets.numel() == 0:
+            return 0.0, 0.0
+        cfg = self._model.config
+        temp = _safe_temperature(cfg.temperature)
+        n_exits = len(cfg.exit_points)
+        n = self._targets.shape[0]
+        chosen = torch.full((n,), n_exits, dtype=torch.long)
+        for idx in range(n_exits - 1, -1, -1):  # earlier exits override later ones
+            probs = torch.softmax(self._heads[idx] / temp, dim=-1)
+            if cfg.routing_policy == "confidence":
+                confidence = probs.max(dim=-1).values.double()
+                fires = confidence >= cfg.confidence_thresholds[idx]
+            else:
+                entropy = -(probs * probs.clamp_min(1e-12).log()).sum(dim=-1)
+                fires = entropy.double() <= cfg.entropy_thresholds[idx]
+            chosen[fires] = idx
+        preds = torch.stack([h.argmax(dim=-1) for h in self._heads])
+        pred = preds[chosen, torch.arange(n)]
+        acc = (pred == self._targets).double().mean().item()
+        comp = self._flops[chosen].mean().item()
+        return acc, comp
 
 
 def _collect_final_logits(
@@ -113,6 +184,10 @@ class _PolicySearch:
 
 
 def _policy_search(model: EarlyExitWrapper, grid: tuple[float, ...] | None) -> _PolicySearch:
+    if grid is not None and len(grid) == 0:
+        # an empty grid searches nothing: calibration would "succeed" with all
+        # exits disabled and the model would never exit early
+        raise ValueError("custom grid must be non-empty (or None for the default)")
     policy = model.config.routing_policy
     if policy == "confidence":
         return _PolicySearch(
@@ -224,11 +299,12 @@ def calibrate_thresholds(
     fitted_t = _maybe_fit_temperature(
         model, fit_temperature, temperature_loader, val_loader, device
     )
+    cache = _EvalCache(model, val_loader, device)
 
     # start fully conservative -- no exits will fire
     best = [search.seed] * n
     setattr(model.config, search.field, list(best))
-    baseline_acc, _ = _evaluate(model, val_loader, device)
+    baseline_acc, _ = cache.evaluate()
 
     # iterate the full grid per exit. an early break would miss thresholds
     # that pass after a transient miss (val accuracy isn't monotone in threshold
@@ -238,7 +314,7 @@ def calibrate_thresholds(
             trial = list(best)
             trial[exit_idx] = thr
             setattr(model.config, search.field, list(trial))
-            acc, _ = _evaluate(model, val_loader, device)
+            acc, _ = cache.evaluate()
             if baseline_acc - acc <= target_accuracy_drop and search.more_aggressive(
                 thr, best[exit_idx]
             ):
@@ -248,7 +324,7 @@ def calibrate_thresholds(
     # search seed back to the in-range disabled value.
     best = [search.no_exit if t == search.seed else t for t in best]
     setattr(model.config, search.field, list(best))
-    final_acc, avg_comp = _evaluate(model, val_loader, device)
+    final_acc, avg_comp = cache.evaluate()
     return CalibrationResult(
         thresholds=best,
         baseline_accuracy=baseline_acc,
@@ -299,11 +375,12 @@ def calibrate_thresholds_for_budget(
     fitted_t = _maybe_fit_temperature(
         model, fit_temperature, temperature_loader, val_loader, device
     )
+    cache = _EvalCache(model, val_loader, device)
 
     # start fully conservative -- no exits fire, compute is the full backbone
     best = [search.seed] * n
     setattr(model.config, search.field, list(best))
-    baseline_acc, current_comp = _evaluate(model, val_loader, device)
+    baseline_acc, current_comp = cache.evaluate()
     budget_met = current_comp <= target_computation
 
     for exit_idx in range(n):
@@ -318,7 +395,7 @@ def calibrate_thresholds_for_budget(
             trial = list(best)
             trial[exit_idx] = thr
             setattr(model.config, search.field, list(trial))
-            acc, comp = _evaluate(model, val_loader, device)
+            acc, comp = cache.evaluate()
             if comp <= target_computation and (within is None or acc > within[0]):
                 within = (acc, thr, comp)
             if comp < current_comp and (fallback is None or comp < fallback[0]):
@@ -347,7 +424,7 @@ def calibrate_thresholds_for_budget(
     # disabled value.
     best = [search.no_exit if t == search.seed else t for t in best]
     setattr(model.config, search.field, list(best))
-    final_acc, avg_comp = _evaluate(model, val_loader, device)
+    final_acc, avg_comp = cache.evaluate()
     return CalibrationResult(
         thresholds=best,
         baseline_accuracy=baseline_acc,
