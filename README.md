@@ -18,8 +18,6 @@
 
 ---
 
-## The 10-second pitch
-
 ```python
 import torch
 from earlyon.models import resnet50_ee
@@ -36,9 +34,6 @@ result.confidence        # softmax confidence at the point it answered
 <p align="center">
   <img src="assets/demo.svg" alt="earlyon demo: an easy image exits at the first head using 12% of the FLOPs, a hard image runs the whole network" width="100%">
 </p>
-
-One wrapper call, three numbers per inference: which head answered, what
-fraction of the compute ran, and how sure the model was when it stopped.
 
 ## Install
 
