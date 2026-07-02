@@ -1,179 +1,115 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" role="img"
-     aria-label="earlyon demo: an easy image exits at the first head using 12% of the FLOPs, a hard image runs the whole network">
-  <title>earlyon — animated demo</title>
-  <desc>A 12-second SMIL loop. A close-up car photo is classified at exit 0
-  after 12% of the network's FLOPs; a blurry bird fails every confidence
-  check and runs all the way to the final classifier.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" role="img" aria-label="earlyon Python session. An easy input (car_closeup) exits at head 0 using 12% of compute; a hard input (blurry_bird) takes no head and runs the full network." font-family="ui-monospace, Menlo, Consolas, monospace">
+  <title>earlyon — inference session</title>
+  <desc>Looping Python REPL. Beat 1: an easy input exits at head 0, using 12% of the network. Beat 2: a hard input takes no head and runs to the final classifier. A spine diagram beside it lights the short path, then the full path.</desc>
 
+  <!-- accent = exited early / compute saved; neutral = ran everything -->
   <defs>
-    <radialGradient id="bg" cx="50%" cy="0%" r="100%">
-      <stop offset="0%"  stop-color="#101828"/>
-      <stop offset="100%" stop-color="#0a0e16"/>
-    </radialGradient>
-    <pattern id="dots" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
-      <circle cx="1" cy="1" r="1" fill="#1a2334"/>
-    </pattern>
+    <marker id="tip-accent" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#12805A"/>
+    </marker>
+    <marker id="tip-neutral" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#75716A"/>
+    </marker>
 
-    <!-- typewriter clips: width animates from 0 to full text width -->
-    <clipPath id="type1">
-      <rect x="0" y="0" width="0" height="24">
-        <animate attributeName="width" values="0;0;385;385" keyTimes="0;0.02;0.10;1"
-                 dur="12s" repeatCount="indefinite"/>
-      </rect>
-    </clipPath>
-    <clipPath id="type2">
-      <rect x="0" y="0" width="0" height="24">
-        <animate attributeName="width" values="0;0;395;395" keyTimes="0;0.48;0.56;1"
-                 dur="12s" repeatCount="indefinite"/>
-      </rect>
-    </clipPath>
+    <!-- typewriter masks: each rect grows from 0 to the measured text extent -->
+    <clipPath id="type-b1-cmd1"><rect x="118" y="110" width="590" height="32"><animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.05;0.1417;0.5;0.52;1" values="0;0;590;590;0;0"/></rect></clipPath>
+    <clipPath id="type-b1-cmd2"><rect x="118" y="154" width="680" height="32"><animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.175;0.2667;0.5;0.52;1" values="0;0;680;680;0;0"/></rect></clipPath>
+    <clipPath id="type-b2-cmd1"><rect x="118" y="110" width="590" height="32"><animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.55;0.6417;0.9917;0.9958;1" values="0;0;590;590;0;0"/></rect></clipPath>
+    <clipPath id="type-b2-cmd2"><rect x="118" y="154" width="680" height="32"><animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.675;0.7667;0.9917;0.9958;1" values="0;0;680;680;0;0"/></rect></clipPath>
   </defs>
 
-  <rect width="1200" height="520" fill="url(#bg)"/>
-  <rect width="1200" height="520" fill="url(#dots)" opacity="0.5"/>
+  <rect x="0" y="0" width="1200" height="520" fill="#FAF8F4"/>
+  <rect x="24" y="24" width="1152" height="472" rx="14" fill="#FFFFFF" stroke="#E6E1D8" stroke-width="1.5"/>
 
-  <!-- ==================== TERMINAL (left) ==================== -->
-  <g transform="translate(36, 32)">
-    <rect x="0" y="0" width="656" height="456" rx="14" fill="#11151e" stroke="#2a3245"/>
-    <rect x="0" y="0" width="656" height="36" rx="14" fill="#171c28"/>
-    <rect x="0" y="18" width="656" height="18" fill="#171c28"/>
-    <circle cx="22" cy="18" r="7" fill="#ff5f57"/>
-    <circle cx="44" cy="18" r="7" fill="#febc2e"/>
-    <circle cx="66" cy="18" r="7" fill="#28c840"/>
-    <text x="328" y="23" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif"
-          font-size="13" fill="#6f7a90">python — earlyon</text>
+  <!-- window chrome: monochrome dots, no decorative color -->
+  <circle cx="54" cy="52" r="6" fill="none" stroke="#C7C0B4" stroke-width="1.5"/>
+  <circle cx="78" cy="52" r="6" fill="none" stroke="#C7C0B4" stroke-width="1.5"/>
+  <circle cx="102" cy="52" r="6" fill="none" stroke="#C7C0B4" stroke-width="1.5"/>
+  <line x1="24" y1="80" x2="1176" y2="80" stroke="#E6E1D8" stroke-width="1.5"/>
 
-    <g font-family="ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace" font-size="14">
-      <!-- act 1: easy input -->
-      <g clip-path="url(#type1)" transform="translate(22, 62)">
-        <text x="0" y="17"><tspan fill="#5d6781">&gt;&gt;&gt; </tspan><tspan fill="#e6e9ed">r = model(car_closeup, mode="inference")</tspan></text>
-      </g>
-      <g opacity="0">
-        <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.12;0.15;1"
-                 dur="12s" repeatCount="indefinite"/>
-        <text x="22" y="112" fill="#9fb0cc">r.exit_taken</text>
-        <text x="250" y="112" fill="#54d18a">0</text>
-        <text x="22" y="136" fill="#9fb0cc">r.computation_used</text>
-        <text x="250" y="136" fill="#54d18a">0.12</text>
-        <text x="22" y="160" fill="#9fb0cc">r.confidence</text>
-        <text x="250" y="160" fill="#e6e9ed">0.97</text>
-        <text x="22" y="192" fill="#5d6781"># confident at the first head.</text>
-        <text x="22" y="214" fill="#5d6781"># 88% of the network never ran.</text>
-      </g>
+  <!-- persistent prompts; commands type in after them -->
+  <text x="56" y="132" font-size="24" fill="#A39D93">&gt;&gt;&gt;</text>
+  <text x="56" y="176" font-size="24" fill="#A39D93">&gt;&gt;&gt;</text>
+  <text x="56" y="308" font-size="24" fill="#A39D93">&gt;&gt;&gt;</text>
+  <rect x="120" y="290" width="11" height="24" fill="#1C1B19">
+    <animate attributeName="opacity" dur="1s" repeatCount="indefinite" calcMode="discrete" keyTimes="0;0.5" values="1;0"/>
+  </rect>
 
-      <!-- act 2: hard input -->
-      <g clip-path="url(#type2)" transform="translate(22, 248)">
-        <text x="0" y="17"><tspan fill="#5d6781">&gt;&gt;&gt; </tspan><tspan fill="#e6e9ed">r = model(blurry_bird, mode="inference")</tspan></text>
-      </g>
-      <g opacity="0">
-        <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.66;0.70;1"
-                 dur="12s" repeatCount="indefinite"/>
-        <text x="22" y="298" fill="#9fb0cc">r.exit_taken</text>
-        <text x="250" y="298" fill="#ff8c5a">-1</text>
-        <text x="22" y="322" fill="#9fb0cc">r.computation_used</text>
-        <text x="250" y="322" fill="#ff8c5a">1.00</text>
-        <text x="22" y="346" fill="#9fb0cc">r.confidence</text>
-        <text x="250" y="346" fill="#e6e9ed">0.91</text>
-        <text x="22" y="378" fill="#5d6781"># no head was sure enough.</text>
-        <text x="22" y="400" fill="#5d6781"># hard inputs go the distance.</text>
-      </g>
-
-      <!-- blinking cursor -->
-      <rect x="22" y="424" width="9" height="17" fill="#49b6ff">
-        <animate attributeName="opacity" values="1;0;1" dur="1.2s" repeatCount="indefinite"/>
-      </rect>
-    </g>
+  <!-- ===== BEAT 1 — easy input, exits at head 0 ===== -->
+  <g opacity="1">
+    <animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.0167;0.0417;0.4667;0.5;1" values="0;0;1;1;0;0"/>
+    <text x="118" y="132" font-size="24" fill="#1C1B19" clip-path="url(#type-b1-cmd1)">r = model(car_closeup, mode="inference")</text>
+    <text x="118" y="176" font-size="24" fill="#1C1B19" clip-path="url(#type-b1-cmd2)">r.exit_taken, r.computation_used, r.confidence</text>
+    <text x="56" y="220" font-size="24" fill="#1C1B19" opacity="0">(0, 0.12, 0.97)<animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.2833;0.30;0.5;0.52;1" values="0;0;1;1;0;0"/></text>
+    <text x="56" y="264" font-size="20" fill="#12805A" opacity="0"># confident at the first head. 88% of the network never ran.<animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.333;0.35;0.5;0.52;1" values="0;0;1;1;0;0"/></text>
   </g>
 
-  <!-- ==================== NETWORK DIAGRAM (right) ==================== -->
-  <g transform="translate(724, 32)" font-family="ui-monospace, Menlo, Consolas, monospace">
-    <rect x="0" y="0" width="440" height="456" rx="14" fill="#0d1220" stroke="#2a3245"/>
-    <text x="220" y="34" text-anchor="middle" font-size="13" fill="#6f7a90"
-          font-family="ui-sans-serif, system-ui, sans-serif">resnet50_ee</text>
+  <!-- ===== BEAT 2 — hard input, no head fires, full network ===== -->
+  <g opacity="0">
+    <animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.5;0.5333;0.9583;0.9917;1" values="0;0;1;1;0;0"/>
+    <text x="118" y="132" font-size="24" fill="#1C1B19" clip-path="url(#type-b2-cmd1)">r = model(blurry_bird, mode="inference")</text>
+    <text x="118" y="176" font-size="24" fill="#1C1B19" clip-path="url(#type-b2-cmd2)">r.exit_taken, r.computation_used, r.confidence</text>
+    <text x="56" y="220" font-size="24" fill="#1C1B19" opacity="0">(-1, 1.00, 0.91)<animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.7917;0.8083;0.9917;0.9958;1" values="0;0;1;1;0;0"/></text>
+    <text x="56" y="264" font-size="20" fill="#75716A" opacity="0"># no head was sure enough. hard inputs go the distance.<animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.8417;0.8583;0.9917;0.9958;1" values="0;0;1;1;0;0"/></text>
+  </g>
 
-    <!-- spine: image -> layer1..layer3 -> final -->
-    <g stroke="#33507f" stroke-width="2" fill="none">
-      <line x1="110" y1="86"  x2="110" y2="118"/>
-      <line x1="110" y1="162" x2="110" y2="194"/>
-      <line x1="110" y1="238" x2="110" y2="270"/>
-      <line x1="110" y1="314" x2="110" y2="346"/>
-    </g>
-    <!-- branches to exit heads -->
-    <g stroke="#33507f" stroke-width="2" fill="none">
-      <line x1="170" y1="140" x2="250" y2="140"/>
-      <line x1="170" y1="216" x2="250" y2="216"/>
-      <line x1="170" y1="292" x2="250" y2="292"/>
-    </g>
+  <line x1="56" y1="350" x2="1144" y2="350" stroke="#E6E1D8" stroke-width="1.5"/>
 
-    <!-- nodes -->
-    <g font-size="14" text-anchor="middle">
-      <rect x="60" y="56" width="100" height="30" rx="15" fill="#13203a" stroke="#33507f"/>
-      <text x="110" y="76" fill="#f4f6fb">image</text>
+  <!-- ===== backbone spine, synced to the beats ===== -->
+  <!-- faint base: whole network always drawn; lit paths sit on top -->
+  <g fill="none" stroke="#D8D2C7">
+    <line x1="40" y1="404" x2="76" y2="404" stroke-width="2"/>
+    <line x1="236" y1="404" x2="336" y2="404" stroke-width="2"/>
+    <line x1="496" y1="404" x2="596" y2="404" stroke-width="2"/>
+    <line x1="756" y1="404" x2="856" y2="404" stroke-width="2"/>
+    <line x1="286" y1="404" x2="286" y2="442" stroke-width="2"/>
+    <line x1="546" y1="404" x2="546" y2="442" stroke-width="2"/>
+    <line x1="806" y1="404" x2="806" y2="442" stroke-width="2"/>
+    <rect x="76" y="378" width="160" height="52" rx="6" stroke-width="1.5"/>
+    <rect x="336" y="378" width="160" height="52" rx="6" stroke-width="1.5"/>
+    <rect x="596" y="378" width="160" height="52" rx="6" stroke-width="1.5"/>
+    <rect x="856" y="378" width="280" height="52" rx="6" stroke-width="1.5"/>
+    <rect x="216" y="442" width="140" height="36" rx="6" stroke-width="1.5"/>
+    <rect x="476" y="442" width="140" height="36" rx="6" stroke-width="1.5"/>
+    <rect x="736" y="442" width="140" height="36" rx="6" stroke-width="1.5"/>
+  </g>
 
-      <rect x="50" y="118" width="120" height="44" rx="8" fill="#13203a" stroke="#33507f"/>
-      <text x="110" y="145" fill="#f4f6fb">layer1</text>
-      <rect x="50" y="194" width="120" height="44" rx="8" fill="#13203a" stroke="#33507f"/>
-      <text x="110" y="221" fill="#f4f6fb">layer2</text>
-      <rect x="50" y="270" width="120" height="44" rx="8" fill="#13203a" stroke="#33507f"/>
-      <text x="110" y="297" fill="#f4f6fb">layer3</text>
-      <rect x="35" y="346" width="150" height="44" rx="8" fill="#13203a" stroke="#33507f"/>
-      <text x="110" y="367" fill="#f4f6fb">layer4 +</text>
-      <text x="110" y="384" fill="#f4f6fb">classifier</text>
+  <!-- beat 1: short path lights — input, layer1, exit 0 -->
+  <g opacity="1">
+    <animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.0167;0.0417;0.4667;0.5;1" values="0;0;1;1;0;0"/>
+    <line x1="40" y1="404" x2="76" y2="404" stroke="#12805A" stroke-width="2.5" marker-end="url(#tip-accent)"/>
+    <rect x="76" y="378" width="160" height="52" rx="6" fill="#E6F1EA" stroke="#12805A" stroke-width="2"/>
+    <line x1="236" y1="404" x2="286" y2="404" stroke="#12805A" stroke-width="2.5"/>
+    <line x1="286" y1="404" x2="286" y2="442" stroke="#12805A" stroke-width="2.5" marker-end="url(#tip-accent)"/>
+    <rect x="216" y="442" width="140" height="36" rx="6" fill="#E6F1EA" stroke="#12805A" stroke-width="2"/>
+  </g>
 
-      <rect x="250" y="118" width="150" height="44" rx="22" fill="#13203a" stroke="#33507f"/>
-      <text x="325" y="139" fill="#f4f6fb">exit 0</text>
-      <text x="325" y="155" font-size="11" fill="#9fb0cc">12% FLOPs</text>
-      <rect x="250" y="194" width="150" height="44" rx="22" fill="#13203a" stroke="#33507f"/>
-      <text x="325" y="215" fill="#f4f6fb">exit 1</text>
-      <text x="325" y="231" font-size="11" fill="#9fb0cc">40% FLOPs</text>
-      <rect x="250" y="270" width="150" height="44" rx="22" fill="#13203a" stroke="#33507f"/>
-      <text x="325" y="291" fill="#f4f6fb">exit 2</text>
-      <text x="325" y="307" font-size="11" fill="#9fb0cc">74% FLOPs</text>
-    </g>
+  <!-- beat 2: full path lights — every layer runs to the classifier, no head taken -->
+  <g opacity="0">
+    <animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.5;0.5333;0.9583;0.9917;1" values="0;0;1;1;0;0"/>
+    <line x1="40" y1="404" x2="76" y2="404" stroke="#75716A" stroke-width="2.5" marker-end="url(#tip-neutral)"/>
+    <rect x="76" y="378" width="160" height="52" rx="6" fill="#EFECE5" stroke="#75716A" stroke-width="2"/>
+    <line x1="236" y1="404" x2="336" y2="404" stroke="#75716A" stroke-width="2.5"/>
+    <rect x="336" y="378" width="160" height="52" rx="6" fill="#EFECE5" stroke="#75716A" stroke-width="2"/>
+    <line x1="496" y1="404" x2="596" y2="404" stroke="#75716A" stroke-width="2.5"/>
+    <rect x="596" y="378" width="160" height="52" rx="6" fill="#EFECE5" stroke="#75716A" stroke-width="2"/>
+    <line x1="756" y1="404" x2="856" y2="404" stroke="#75716A" stroke-width="2.5" marker-end="url(#tip-neutral)"/>
+    <rect x="856" y="378" width="280" height="52" rx="6" fill="#EFECE5" stroke="#75716A" stroke-width="2"/>
+  </g>
 
-    <!-- ===== act 1 overlay: easy image leaves at exit 0 (green) ===== -->
-    <g opacity="0">
-      <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.10;0.13;0.46;0.52;1"
-               dur="12s" repeatCount="indefinite"/>
-      <line x1="110" y1="86" x2="110" y2="118" stroke="#54d18a" stroke-width="3"/>
-      <rect x="50" y="118" width="120" height="44" rx="8" fill="none" stroke="#54d18a" stroke-width="2.5"/>
-      <line x1="170" y1="140" x2="250" y2="140" stroke="#54d18a" stroke-width="3"/>
-      <rect x="250" y="118" width="150" height="44" rx="22" fill="#123322" stroke="#54d18a" stroke-width="2.5"/>
-      <text x="325" y="139" text-anchor="middle" font-size="14" fill="#a7f3c8">exit 0 ✓</text>
-      <text x="325" y="155" text-anchor="middle" font-size="11" fill="#54d18a">12% FLOPs</text>
-      <text x="220" y="432" text-anchor="middle" font-size="13" fill="#54d18a">confident → left after layer1</text>
-    </g>
-
-    <!-- ===== act 2 overlay: hard image runs the whole spine (orange) ===== -->
-    <g>
-      <g opacity="0">
-        <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.56;0.59;0.97;1"
-                 dur="12s" repeatCount="indefinite"/>
-        <line x1="110" y1="86" x2="110" y2="118" stroke="#ff6b35" stroke-width="3"/>
-        <rect x="50" y="118" width="120" height="44" rx="8" fill="none" stroke="#ff6b35" stroke-width="2.5"/>
-      </g>
-      <g opacity="0">
-        <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.59;0.62;0.97;1"
-                 dur="12s" repeatCount="indefinite"/>
-        <line x1="110" y1="162" x2="110" y2="194" stroke="#ff6b35" stroke-width="3"/>
-        <rect x="50" y="194" width="120" height="44" rx="8" fill="none" stroke="#ff6b35" stroke-width="2.5"/>
-      </g>
-      <g opacity="0">
-        <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.62;0.65;0.97;1"
-                 dur="12s" repeatCount="indefinite"/>
-        <line x1="110" y1="238" x2="110" y2="270" stroke="#ff6b35" stroke-width="3"/>
-        <rect x="50" y="270" width="120" height="44" rx="8" fill="none" stroke="#ff6b35" stroke-width="2.5"/>
-      </g>
-      <g opacity="0">
-        <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.65;0.68;0.97;1"
-                 dur="12s" repeatCount="indefinite"/>
-        <line x1="110" y1="314" x2="110" y2="346" stroke="#ff6b35" stroke-width="3"/>
-        <rect x="35" y="346" width="150" height="44" rx="8" fill="#331a0e" stroke="#ff6b35" stroke-width="2.5"/>
-        <text x="110" y="367" text-anchor="middle" font-size="14" fill="#ffc24b">layer4 +</text>
-        <text x="110" y="384" text-anchor="middle" font-size="14" fill="#ffc24b">classifier</text>
-        <text x="220" y="432" text-anchor="middle" font-size="13" fill="#ff8c5a">never confident → ran everything</text>
-      </g>
-    </g>
+  <!-- labels above every fill; one text per column, explicit x -->
+  <g font-size="20" fill="#8B867D" text-anchor="middle">
+    <text x="156" y="411">layer1</text>
+    <text x="416" y="411">layer2</text>
+    <text x="676" y="411">layer3</text>
+    <text x="996" y="411">layer4 + classifier</text>
+  </g>
+  <g font-size="19" fill="#8B867D">
+    <text x="232" y="465">exit 0</text>
+    <text x="346" y="465" text-anchor="end">12%</text>
+    <text x="492" y="465">exit 1</text>
+    <text x="606" y="465" text-anchor="end">40%</text>
+    <text x="752" y="465">exit 2</text>
+    <text x="866" y="465" text-anchor="end">74%</text>
   </g>
 </svg>

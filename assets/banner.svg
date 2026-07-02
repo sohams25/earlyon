@@ -1,103 +1,50 @@
-<svg width="1280" height="360" viewBox="0 0 1280 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="earlyon — early-exit inference for PyTorch CV models">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" role="img" aria-label="earlyon: early-exit inference for PyTorch CV models. An easy input enters layer1 and leaves at exit 0, using 12% of the network; layer2, layer3 and layer4 stay unused." font-family="ui-monospace, Menlo, Consolas, monospace">
+  <title>earlyon</title>
+  <desc>Masthead for earlyon. An easy input enters layer1 and leaves the network at exit 0 (12% of compute); layer2, layer3 and layer4 stay unused.</desc>
+
+  <!-- accent = exited early / compute saved; neutral = ran everything -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="360" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#0A0E16"/>
-      <stop offset="0.55" stop-color="#0C1322"/>
-      <stop offset="1" stop-color="#0E1A30"/>
-    </linearGradient>
-    <linearGradient id="ember" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#FFC24B"/>
-      <stop offset="1" stop-color="#FF6B35"/>
-    </linearGradient>
-    <linearGradient id="emberSoft" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#FFC24B" stop-opacity="0.9"/>
-      <stop offset="1" stop-color="#FF6B35" stop-opacity="0.55"/>
-    </linearGradient>
-    <pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse">
-      <path d="M34 0H0V34" fill="none" stroke="#9DB4E0" stroke-opacity="0.05" stroke-width="1"/>
-    </pattern>
-    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="6"/>
-    </filter>
+    <marker id="head-accent" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#12805A"/>
+    </marker>
+    <marker id="head-neutral" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8B867D"/>
+    </marker>
   </defs>
 
-  <!-- canvas -->
-  <rect width="1280" height="360" rx="20" fill="url(#bg)"/>
-  <rect width="1280" height="360" rx="20" fill="url(#grid)"/>
-  <rect x="0.5" y="0.5" width="1279" height="359" rx="19.5" fill="none" stroke="#243049" stroke-opacity="0.7"/>
+  <rect x="0" y="0" width="1280" height="400" fill="#FAF8F4"/>
 
-  <!-- ============ left: wordmark + message ============ -->
-  <g font-family="'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif">
-    <!-- eyebrow -->
-    <text x="72" y="92" fill="#7E8CA8" font-size="19" font-weight="600" letter-spacing="5">EARLY EXIT · PYTORCH · EDGE AI</text>
+  <!-- masthead -->
+  <text x="70" y="122" font-size="74" font-weight="700" letter-spacing="-2" fill="#1C1B19">earlyon</text>
+  <text x="73" y="162" font-size="25" fill="#75716A">Early-exit inference for PyTorch CV models.</text>
+  <line x1="72" y1="196" x2="1116" y2="196" stroke="#E6E1D8" stroke-width="1.5"/>
 
-    <!-- wordmark -->
-    <text x="69" y="196" font-size="118" font-weight="800" letter-spacing="-3">
-      <tspan fill="#F4F6FB">early</tspan><tspan fill="url(#ember)">on</tspan>
-    </text>
-    <!-- tagline -->
-    <text x="74" y="246" fill="#AEBAD0" font-size="27" font-weight="500">Early-exit inference for PyTorch CV models.</text>
-    <text x="74" y="280" fill="#AEBAD0" font-size="27" font-weight="500">Easy inputs leave the network early.</text>
+  <!-- ===== backbone spine ===== -->
+  <!-- unused remainder: layer2 -> layer3 -> layer4, dashed neutral -->
+  <g>
+    <line x1="266" y1="262" x2="336" y2="262" stroke="#B9B3A8" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#head-neutral)"/>
+    <line x1="506" y1="262" x2="576" y2="262" stroke="#B9B3A8" stroke-width="2" stroke-dasharray="6 5"/>
+    <line x1="746" y1="262" x2="816" y2="262" stroke="#B9B3A8" stroke-width="2" stroke-dasharray="6 5"/>
 
-    <!-- metric chips -->
-    <g transform="translate(74,308)">
-      <rect x="0" y="0" width="170" height="34" rx="17" fill="#161F33" stroke="#33415C"/>
-      <text x="18" y="23" fill="#FF8A4C" font-size="16" font-weight="700">1.3–2.5× faster</text>
+    <rect x="336" y="232" width="170" height="60" rx="6" fill="#EFECE5" stroke="#C7C0B4" stroke-width="1.5" stroke-dasharray="6 5"/>
+    <rect x="576" y="232" width="170" height="60" rx="6" fill="#EFECE5" stroke="#C7C0B4" stroke-width="1.5" stroke-dasharray="6 5"/>
+    <rect x="816" y="232" width="300" height="60" rx="6" fill="#EFECE5" stroke="#C7C0B4" stroke-width="1.5" stroke-dasharray="6 5"/>
 
-      <rect x="184" y="0" width="178" height="34" rx="17" fill="#161F33" stroke="#33415C"/>
-      <text x="202" y="23" fill="#9FB0CC" font-size="16" font-weight="600">≈ same accuracy</text>
-
-      <rect x="376" y="0" width="228" height="34" rx="17" fill="#161F33" stroke="#33415C"/>
-      <text x="394" y="23" fill="#9FB0CC" font-size="16" font-weight="600" font-family="'SFMono-Regular', Consolas, monospace">pip install earlyon</text>
-    </g>
+    <text x="421" y="270" font-size="22" text-anchor="middle" fill="#8B867D">layer2</text>
+    <text x="661" y="270" font-size="22" text-anchor="middle" fill="#8B867D">layer3</text>
+    <text x="966" y="270" font-size="20" text-anchor="middle" fill="#8B867D">layer4 + classifier</text>
   </g>
 
-  <!-- ============ right: early-exit network motif ============ -->
-  <!-- backbone spine through 4 stages; easy inputs peel off at the first exits -->
-  <g transform="translate(706,40)">
-    <!-- spine connectors -->
-    <path d="M62 110 H470" stroke="#33507F" stroke-width="3" stroke-linecap="round"/>
+  <!-- taken path: input -> layer1 -> exit 0, solid accent -->
+  <g>
+    <line x1="40" y1="262" x2="96" y2="262" stroke="#12805A" stroke-width="2.5" marker-end="url(#head-accent)"/>
+    <line x1="181" y1="292" x2="181" y2="330" stroke="#12805A" stroke-width="2.5" marker-end="url(#head-accent)"/>
 
-    <!-- stage blocks -->
-    <g>
-      <rect x="14"  y="80" width="64" height="60" rx="12" fill="#13203A" stroke="#3A557F"/>
-      <rect x="130" y="80" width="64" height="60" rx="12" fill="#13203A" stroke="#3A557F"/>
-      <rect x="246" y="80" width="64" height="60" rx="12" fill="#13203A" stroke="#3A557F"/>
-      <rect x="362" y="80" width="64" height="60" rx="12" fill="#13203A" stroke="#3A557F"/>
-    </g>
-    <g fill="#6B7C9E" font-family="'SFMono-Regular', Consolas, monospace" font-size="13" text-anchor="middle">
-      <text x="46"  y="115">L1</text>
-      <text x="162" y="115">L2</text>
-      <text x="278" y="115">L3</text>
-      <text x="394" y="115">L4</text>
-    </g>
+    <rect x="96" y="232" width="170" height="60" rx="6" fill="#FFFFFF" stroke="#12805A" stroke-width="2"/>
+    <text x="181" y="270" font-size="22" text-anchor="middle" fill="#1C1B19">layer1</text>
 
-    <!-- exit branches dropping to exit heads (earliest = brightest = biggest win) -->
-    <!-- exit 0 -->
-    <path d="M46 140 C46 180 46 180 46 206" stroke="url(#ember)" stroke-width="3" fill="none"/>
-    <g filter="url(#soft)"><rect x="20" y="206" width="52" height="44" rx="11" fill="url(#emberSoft)"/></g>
-    <rect x="20" y="206" width="52" height="44" rx="11" fill="#1A1206" stroke="url(#ember)" stroke-width="2"/>
-    <path d="M34 228 l8 8 l14 -16" stroke="#FFC24B" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    <!-- exit 1 -->
-    <path d="M162 140 C162 180 162 180 162 206" stroke="#FF8A4C" stroke-opacity="0.85" stroke-width="3" fill="none"/>
-    <rect x="136" y="206" width="52" height="44" rx="11" fill="#16203A" stroke="#FF8A4C" stroke-opacity="0.85" stroke-width="2"/>
-    <path d="M150 228 l8 8 l14 -16" stroke="#FF8A4C" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    <!-- exit 2 -->
-    <path d="M278 140 C278 180 278 180 278 206" stroke="#6E86B4" stroke-width="3" fill="none"/>
-    <rect x="252" y="206" width="52" height="44" rx="11" fill="#16203A" stroke="#52668C" stroke-width="2"/>
-    <path d="M266 228 l8 8 l14 -16" stroke="#8FA2C6" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-
-    <!-- final classifier (the "no early exit" path) -->
-    <path d="M426 110 H470" stroke="#33507F" stroke-width="3" stroke-linecap="round"/>
-    <rect x="470" y="84" width="56" height="52" rx="12" fill="#101728" stroke="#52668C" stroke-width="2"/>
-    <circle cx="498" cy="110" r="9" fill="none" stroke="#8FA2C6" stroke-width="2.5"/>
-
-    <!-- labels -->
-    <g font-family="'SFMono-Regular', Consolas, monospace" font-size="12.5" text-anchor="middle">
-      <text x="46"  y="270" fill="#FFB877">exit 0</text>
-      <text x="162" y="270" fill="#C9A98C">exit 1</text>
-      <text x="278" y="270" fill="#6E7E9E">exit 2</text>
-      <text x="498" y="158" fill="#6E7E9E">final</text>
-    </g>
+    <rect x="101" y="332" width="160" height="56" rx="6" fill="#E6F1EA" stroke="#12805A" stroke-width="2"/>
+    <text x="119" y="366" font-size="22" fill="#12805A">exit 0</text>
+    <text x="243" y="366" font-size="20" text-anchor="end" fill="#12805A">12%</text>
   </g>
 </svg>

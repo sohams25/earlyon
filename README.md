@@ -4,11 +4,11 @@
 
 <p align="center">
   <a href="https://github.com/sohams25/earlyon/actions/workflows/ci.yml"><img alt="ci" src="https://github.com/sohams25/earlyon/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="python" src="https://img.shields.io/badge/python-3.10+-49b6ff?style=flat-square&labelColor=0a0a0e">
-  <img alt="coverage" src="https://img.shields.io/badge/coverage-96%25-54d18a?style=flat-square&labelColor=0a0a0e">
-  <img alt="mypy" src="https://img.shields.io/badge/mypy-strict-5E6AD2?style=flat-square&labelColor=0a0a0e">
-  <img alt="version" src="https://img.shields.io/badge/version-0.2.0-FF6B35?style=flat-square&labelColor=0a0a0e">
-  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-ECEDF1?style=flat-square&labelColor=0a0a0e"></a>
+  <img alt="python" src="https://img.shields.io/badge/python-3.10+-blue">
+  <img alt="coverage" src="https://img.shields.io/badge/coverage-96%25-brightgreen">
+  <img alt="mypy" src="https://img.shields.io/badge/mypy-strict-blue">
+  <img alt="version" src="https://img.shields.io/badge/version-0.2.0-lightgrey">
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
 </p>
 
 > **`earlyon`** — early exits for PyTorch CV models. Small classifier heads
