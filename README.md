@@ -205,29 +205,19 @@ result.exit_taken              # the layer the whole batch left at
 result.per_sample_confidence   # tensor of shape (16,)
 ```
 
-The same pipeline from the shell:
+The same pipeline from the shell, wrap to benchmark:
 
 ```bash
-# wrap a backbone (add --no-pretrained to skip the weight download)
 earlyon wrap --backbone resnet50 --num-classes 10 --output model.pth
-earlyon wrap --backbone cifar_resnet20 --num-classes 10 --output cifar.pth
-
-# two-stage training on CIFAR-10 (downloads the dataset on first run)
-earlyon train backbone --backbone resnet50 --num-classes 10 \
-    --dataset cifar10 --epochs 90 --output backbone.pth
-earlyon train exits --model backbone.pth --dataset cifar10 --epochs 20 --output ee.pth
-earlyon train joint --model backbone.pth --dataset cifar10 --epochs 30 --output joint.pth
-
-# calibrate: accuracy budget, or compute budget
+earlyon train backbone --backbone resnet50 --num-classes 10 --dataset cifar10 --output backbone.pth
+earlyon train exits --model backbone.pth --dataset cifar10 --output ee.pth
 earlyon calibrate --model ee.pth --target-drop 0.01 --output calibrated.pth
-earlyon calibrate --model ee.pth --target-compute 0.8 --output budget.pth
-
-# measure
-earlyon benchmark --model calibrated.pth --device cuda --runs 500
-earlyon profile   --model calibrated.pth --runs 200   # Jetson power + thermals
-earlyon analyze   --model calibrated.pth              # per-exit accuracy + distribution
-earlyon export    --model calibrated.pth --output model.onnx
+earlyon benchmark --model calibrated.pth --device cuda
 ```
+
+Every command takes `--help`. The rest of the toolkit: `train joint`,
+`calibrate --target-compute`, `analyze` (per-exit accuracy), `profile`
+(Jetson power), `export` (ONNX).
 
 ## How it works
 
