@@ -11,8 +11,7 @@ import torch
 from earlyon import __version__
 from earlyon.benchmarking import (
     JetsonProfiler,
-    benchmark_backbone,
-    benchmark_wrapper,
+    benchmark_models,
     evaluate,
 )
 from earlyon.core.thresholds import calibrate_thresholds, calibrate_thresholds_for_budget
@@ -253,17 +252,26 @@ def calibrate(
 def benchmark(
     model_path: str, device: str, runs: int, warmup: int, input_size: int, json_out: str | None
 ) -> None:
-    """Throughput + latency benchmark, single-sample (batch=1)."""
+    """Throughput + latency benchmark, single-sample (batch=1).
+
+    The wrapper and its raw backbone are measured on the exact same
+    fixed-seed noise samples with identical boundaries. Noise input is a
+    best-case bound (trained heads may fire spuriously); use the Python API
+    with a real loader for the honest input-distribution signal.
+    """
     dev = _device(device)
     model = load_wrapper(model_path)
     shape = (1, 3, input_size, input_size)
-    wrap_r = benchmark_wrapper(
-        model, input_shape=shape, device=dev, num_warmup=warmup, num_runs=runs
+    cmp_r = benchmark_models(
+        {"early_exit": model, "backbone": model.backbone},
+        input_shape=shape,
+        device=dev,
+        num_warmup=warmup,
+        num_runs=runs,
     )
-    bb_r = benchmark_backbone(
-        model.backbone, input_shape=shape, device=dev, num_warmup=warmup, num_runs=runs
-    )
-    speedup = wrap_r.throughput_ips / max(bb_r.throughput_ips, 1e-9)
+    wrap_r = cmp_r.results["early_exit"]
+    bb_r = cmp_r.results["backbone"]
+    speedup = cmp_r.speedup_vs("early_exit", "backbone")
     click.echo(
         json.dumps(
             {
