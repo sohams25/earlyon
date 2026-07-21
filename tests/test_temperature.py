@@ -69,3 +69,42 @@ def test_nonfinite_logits_raise_instead_of_poisoning_temperature():
     inf_logits[0, 0] = float("inf")
     with pytest.raises(ValueError, match="NaN or Inf"):
         fit_temperature(inf_logits, targets)
+
+
+def test_fit_temperature_full_reports_status():
+    """The status-carrying fit must return a finite positive temperature and a
+    coherent (converged, fallback) pair on well-behaved logits."""
+    import torch
+
+    from earlyon.core.temperature import fit_temperature_full
+
+    torch.manual_seed(0)
+    logits = torch.randn(200, 10) * 3.0
+    targets = torch.randint(0, 10, (200,))
+    result = fit_temperature_full(logits, targets)
+    assert result.temperature > 0.0
+    import math
+
+    assert math.isfinite(result.temperature)
+    assert isinstance(result.converged, bool)
+    assert isinstance(result.fallback, bool)
+    assert not result.fallback  # nothing degenerate here
+
+
+def test_fit_temperature_full_never_returns_invalid_temperature():
+    """Even on tiny/degenerate batches the fit must return a value that
+    EarlyExitConfig.validate() accepts (finite, > 0) — falling back to 1.0
+    with fallback=True rather than emitting a poison value."""
+    import math
+
+    import torch
+
+    from earlyon.core.temperature import fit_temperature_full
+
+    torch.manual_seed(1)
+    # single-sample, extreme logits: classic LBFGS divergence bait
+    logits = torch.tensor([[1e4, -1e4, 0.0]])
+    targets = torch.tensor([1])
+    result = fit_temperature_full(logits, targets, max_outer_steps=3)
+    assert math.isfinite(result.temperature)
+    assert result.temperature > 0.0

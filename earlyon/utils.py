@@ -1,15 +1,40 @@
-"""Small shared helpers: dataset loaders, checkpoint save/load."""
+"""Small shared helpers: dataset loaders, checkpoint save/load.
+
+Checkpoint contract (format_version 2)
+--------------------------------------
+``save_wrapper`` writes a dict with:
+
+* ``format_version`` — integer schema version (currently 2).
+* ``earlyon_version`` — the library version that wrote the file.
+* ``config`` — everything needed to reconstruct routing behavior when the
+  factory is known: backbone id, num_classes, routing policy, both threshold
+  lists, ``enabled_exits``, per-head ``temperatures``, loss weights, and the
+  exit points (name / layer_name / in_channels).
+* ``state_dict`` — the wrapper's weights.
+
+``load_wrapper`` reads v2 files directly and migrates unversioned (v1) files:
+the legacy scalar ``temperature`` is broadcast to every head, and the legacy
+"disabled" threshold sentinels (confidence ``1.0`` / entropy ``0.0``, for the
+active policy only) become explicit ``enabled_exits=False`` entries, with a
+``UserWarning`` describing the migration.
+
+Arbitrary ``custom_ee`` backbones cannot be reconstructed from a string; pass
+``factory=`` (a zero-argument callable returning a structurally identical
+wrapper) to load them.
+"""
 
 from __future__ import annotations
 
+import math
 import warnings
 from pathlib import Path
-from typing import Tuple
+from typing import Any, Callable, Tuple
 
 import torch
 from torch.utils.data import DataLoader, Subset
 
-from earlyon.core.types import Batch
+from earlyon import __version__
+from earlyon.core.types import FINAL_HEAD, Batch
 from earlyon.core.wrappers import EarlyExitWrapper
 from earlyon.models import (
     cifar_resnet_ee,
@@ -21,6 +46,8 @@ from earlyon.models import (
 )
 
 _CIFAR_PREFIX = "cifar_resnet"
+
+CHECKPOINT_FORMAT_VERSION = 2
 
 FACTORIES = {
     "resnet18": resnet18_ee,
@@ -58,21 +85,22 @@ def build_model(backbone: str, num_classes: int, pretrained: bool = True) -> Ear
 
 
 def save_wrapper(model: EarlyExitWrapper, path: str | Path) -> None:
-    """Save state_dict + config. Config is needed to rebuild the wrapper.
+    """Save state_dict + a versioned config (format_version 2).
 
-    ``routing_policy`` and ``entropy_thresholds`` are persisted too: without
-    them an entropy-routed model would silently reload as confidence-routed
-    (the wrapper default), discarding the calibrated entropy thresholds.
+    The config records everything needed to reconstruct routing behavior when
+    the model factory is known — see the module docstring for the contract.
     """
     if model.config.backbone == "custom":
         warnings.warn(
             "saving a custom_ee model: load_wrapper cannot rebuild an arbitrary "
-            "backbone from this artifact. To restore it, reconstruct the backbone, "
-            "re-wrap with custom_ee(...), and load the saved state_dict manually.",
+            "backbone from a string. To restore it, rebuild the backbone and pass "
+            "factory=lambda: custom_ee(...) to load_wrapper.",
             UserWarning,
             stacklevel=2,
         )
     payload = {
+        "format_version": CHECKPOINT_FORMAT_VERSION,
+        "earlyon_version": __version__,
         "state_dict": model.state_dict(),
         "config": {
             "backbone": model.config.backbone,
@@ -80,18 +108,109 @@ def save_wrapper(model: EarlyExitWrapper, path: str | Path) -> None:
             "routing_policy": model.config.routing_policy,
             "confidence_thresholds": list(model.config.confidence_thresholds),
             "entropy_thresholds": list(model.config.entropy_thresholds),
+            "enabled_exits": list(model.config.enabled_exits),
+            "temperatures": dict(model.config.temperatures),
             "loss_weights": list(model.config.loss_weights),
-            "temperature": model.config.temperature,
+            "exit_points": [
+                {"name": ep.name, "layer_name": ep.layer_name, "in_channels": ep.in_channels}
+                for ep in model.config.exit_points
+            ],
         },
     }
     torch.save(payload, Path(path))
 
 
-def load_wrapper(path: str | Path, pretrained_backbone: bool = False) -> EarlyExitWrapper:
+def _migrate_v1_config(cfg: dict[str, Any], model: EarlyExitWrapper, name: str) -> dict[str, Any]:
+    """Translate an unversioned (v1) checkpoint config into v2 shape.
+
+    Deterministic rules:
+
+    * the legacy scalar ``temperature`` is broadcast to every head (that is
+      exactly what v1 routing did); a non-finite/non-positive scalar falls
+      back to 1.0 with a warning instead of failing the load, matching the
+      v1 runtime guard.
+    * the legacy "disabled" sentinels — confidence threshold ``1.0`` /
+      entropy threshold ``0.0`` on the *active* policy — become explicit
+      ``enabled_exits=False``. Under v1 semantics such an exit could still
+      fire on a numerically saturated softmax; the documented intent was
+      "disabled", which the explicit flag now honors exactly.
+    """
+    migrated = dict(cfg)
+    n_exits = len(model.config.exit_points)
+
+    temperature = float(cfg.get("temperature", 1.0))
+    if not math.isfinite(temperature) or temperature <= 0.0:
+        warnings.warn(
+            f"checkpoint {name}: legacy temperature {temperature} is invalid; "
+            "falling back to 1.0 (uncalibrated)",
+            UserWarning,
+            stacklevel=3,
+        )
+        temperature = 1.0
+    head_names = [ep.name for ep in model.config.exit_points] + [FINAL_HEAD]
+    migrated["temperatures"] = {h: temperature for h in head_names}
+
+    policy = cfg.get("routing_policy", "confidence")
+    if policy == "confidence":
+        active = [float(t) for t in cfg.get("confidence_thresholds", [])]
+        sentinel = 1.0
+    else:
+        active = [float(t) for t in cfg.get("entropy_thresholds", [0.0] * n_exits)]
+        sentinel = 0.0
+    enabled = [t != sentinel for t in active]
+    migrated["enabled_exits"] = enabled
+    if not all(enabled):
+        disabled_idx = [i for i, e in enumerate(enabled) if not e]
+        warnings.warn(
+            f"checkpoint {name}: migrated v1 sentinel threshold(s) at exit(s) "
+            f"{disabled_idx} to explicit enabled_exits=False. Under v1 these "
+            "exits could still fire on a saturated softmax; they are now "
+            "strictly disabled.",
+            UserWarning,
+            stacklevel=3,
+        )
+    return migrated
+
+
+def load_wrapper(
+    path: str | Path,
+    pretrained_backbone: bool = False,
+    factory: Callable[[], EarlyExitWrapper] | None = None,
+) -> EarlyExitWrapper:
+    """Load a checkpoint written by :func:`save_wrapper`.
+
+    ``factory`` — required for ``custom_ee`` models — must return a wrapper
+    structurally identical to the saved one; the checkpoint's routing config
+    and weights are then applied to it. Built-in backbones are reconstructed
+    automatically via :func:`build_model`.
+    """
     # weights_only=True prevents pickle code-exec from malicious .pth files
     payload = torch.load(Path(path), map_location="cpu", weights_only=True)
+    name = Path(path).name
+    if "config" not in payload or "state_dict" not in payload:
+        raise ValueError(f"checkpoint {name}: missing 'config'/'state_dict'; not an earlyon file")
+    version = int(payload.get("format_version", 1))
+    if version > CHECKPOINT_FORMAT_VERSION:
+        raise ValueError(
+            f"checkpoint {name}: format_version {version} is newer than this "
+            f"earlyon supports ({CHECKPOINT_FORMAT_VERSION}); upgrade earlyon"
+        )
     cfg = payload["config"]
-    model = build_model(cfg["backbone"], cfg["num_classes"], pretrained=pretrained_backbone)
+
+    if factory is not None:
+        model = factory()
+    elif cfg["backbone"] == "custom":
+        raise ValueError(
+            f"checkpoint {name}: backbone is 'custom', which cannot be rebuilt "
+            "from a string. Reconstruct the backbone and pass "
+            "factory=lambda: custom_ee(backbone, exit_layers=[...], ...) with the "
+            "same structure it was saved with."
+        )
+    else:
+        model = build_model(cfg["backbone"], cfg["num_classes"], pretrained=pretrained_backbone)
+
+    if version < 2:
+        cfg = _migrate_v1_config(cfg, model, name)
 
     # Validate config shape BEFORE mutating model.config. A checkpoint saved
     # against a different exit count would otherwise leave model.config in a
@@ -101,46 +220,54 @@ def load_wrapper(path: str | Path, pretrained_backbone: bool = False) -> EarlyEx
     weight_len = len(cfg["loss_weights"])
     if thr_len != n_exits:
         raise ValueError(
-            f"checkpoint {Path(path).name}: confidence_thresholds has "
+            f"checkpoint {name}: confidence_thresholds has "
             f"length {thr_len}, but backbone {cfg['backbone']!r} has "
             f"{n_exits} exit points"
         )
     if weight_len != n_exits + 1:
         raise ValueError(
-            f"checkpoint {Path(path).name}: loss_weights has length "
+            f"checkpoint {name}: loss_weights has length "
             f"{weight_len}, expected {n_exits + 1} (one per exit plus final)"
         )
-    # entropy_thresholds + routing_policy are optional for back-compat with
-    # pre-0.2 checkpoints; validate them only when present. load_wrapper
-    # bypasses EarlyExitConfig.__post_init__, so re-validate the persisted policy
-    # here — otherwise a corrupted checkpoint would silently mis-route.
+    # entropy_thresholds is optional in v1 files; validate when present.
     if "entropy_thresholds" in cfg and len(cfg["entropy_thresholds"]) != n_exits:
         raise ValueError(
-            f"checkpoint {Path(path).name}: entropy_thresholds has length "
+            f"checkpoint {name}: entropy_thresholds has length "
             f"{len(cfg['entropy_thresholds'])}, but backbone {cfg['backbone']!r} "
             f"has {n_exits} exit points"
         )
     policy = cfg.get("routing_policy", model.config.routing_policy)
     if policy not in {"confidence", "entropy"}:
         raise ValueError(
-            f"checkpoint {Path(path).name}: unsupported routing_policy {policy!r} "
+            f"checkpoint {name}: unsupported routing_policy {policy!r} "
             "(allowed: 'confidence', 'entropy')"
         )
     if policy == "entropy" and "entropy_thresholds" not in cfg:
         raise ValueError(
-            f"checkpoint {Path(path).name}: routing_policy='entropy' but no "
+            f"checkpoint {name}: routing_policy='entropy' but no "
             "entropy_thresholds were persisted — the model would silently route "
             "on uncalibrated defaults"
         )
+    # v2 files carry the exit points; cross-check them against the rebuilt
+    # model so a checkpoint from a different factory revision fails loudly.
+    if "exit_points" in cfg:
+        saved = [(p["name"], p["layer_name"], int(p["in_channels"])) for p in cfg["exit_points"]]
+        built = [(ep.name, ep.layer_name, ep.in_channels) for ep in model.config.exit_points]
+        if saved != built:
+            raise ValueError(
+                f"checkpoint {name}: saved exit points {saved} do not match the "
+                f"reconstructed model's exit points {built}; the factory or "
+                "earlyon version that wrote this file placed exits differently"
+            )
 
-    model.config.confidence_thresholds = list(cfg["confidence_thresholds"])
-    model.config.loss_weights = list(cfg["loss_weights"])
-    model.config.temperature = float(cfg["temperature"])
-    # back-compat: older checkpoints predate these fields; keep the fresh
-    # model's defaults when the key is absent.
+    model.config.confidence_thresholds = [float(t) for t in cfg["confidence_thresholds"]]
+    model.config.loss_weights = [float(w) for w in cfg["loss_weights"]]
     model.config.routing_policy = policy
     if "entropy_thresholds" in cfg:
-        model.config.entropy_thresholds = list(cfg["entropy_thresholds"])
+        model.config.entropy_thresholds = [float(t) for t in cfg["entropy_thresholds"]]
+    model.config.enabled_exits = [bool(e) for e in cfg["enabled_exits"]]
+    model.config.temperatures = {k: float(v) for k, v in cfg["temperatures"].items()}
+    model.config.validate()
     model.load_state_dict(payload["state_dict"])
     return model
 

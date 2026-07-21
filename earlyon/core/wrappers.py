@@ -16,24 +16,26 @@ import torch
 import torch.nn as nn
 
 from earlyon.core.flops import per_layer_flops
-from earlyon.core.types import EarlyExitConfig, InferenceResult
+from earlyon.core.types import FINAL_HEAD, EarlyExitConfig, InferenceResult
 
 if TYPE_CHECKING:
     from earlyon.core.types import BatchedInferenceResult
 
 
 def _safe_temperature(temperature: float) -> float:
-    """Clamp the softmax temperature to a strictly positive, finite value.
+    """Defense-in-depth guard for the softmax temperature at routing time.
 
-    A NaN/Inf temperature (e.g. from a diverged ``fit_temperature`` on degenerate
-    logits) would otherwise poison every softmax: ``max(nan, 1e-6)`` returns
-    ``nan`` because Python ``max`` keeps its first argument on a False compare,
-    and ``softmax(logits / nan)`` is silently all-NaN. Falling back to 1.0
-    (the no-op temperature) keeps routing well-defined.
+    ``EarlyExitConfig.validate()`` rejects non-finite or non-positive
+    temperatures at every trust boundary (construction, wrapping, checkpoint
+    load), so a bad value can only appear here through direct post-hoc
+    mutation of ``config.temperatures``. In that case fall back to 1.0 (the
+    no-op temperature): a NaN would silently poison every softmax, and the
+    old ``max(t, 1e-6)`` clamp turned an invalid negative temperature into an
+    artificially razor-sharp softmax — worse than no calibration at all.
     """
-    if not math.isfinite(temperature):
+    if not math.isfinite(temperature) or temperature <= 0.0:
         return 1.0
-    return max(temperature, 1e-6)
+    return temperature
 
 
 def _is_compiling() -> bool:
@@ -97,6 +99,16 @@ class EarlyExitWrapper(nn.Module):
         self.backbone = backbone
         self.exit_heads = nn.ModuleDict(exit_heads)
         self._final_classifier = final_classifier
+        # re-validate at this trust boundary: the config is mutable and may
+        # have been edited between construction and wrapping.
+        config.validate()
+        missing_heads = [ep.name for ep in config.exit_points if ep.name not in exit_heads]
+        extra_heads = [n for n in exit_heads if all(ep.name != n for ep in config.exit_points)]
+        if missing_heads or extra_heads:
+            raise ValueError(
+                "exit_heads must have exactly one head per configured exit point; "
+                f"missing: {missing_heads}, unexpected: {extra_heads}"
+            )
         self.config = config
 
         # ordered list of (exit_idx, exit_name, layer_name)
@@ -195,18 +207,18 @@ class EarlyExitWrapper(nn.Module):
                         predictions=sig.prediction,
                         exit_taken=sig.exit_idx,
                         per_sample_confidence=sig.per_sample_confidence,
-                        computation_used=self._flops_at[layer_name],
+                        estimated_backbone_flops_fraction=self._flops_at[layer_name],
                     )
                 # no exit fired
                 final_logits = self._final_classifier(feats)
-                temp = _safe_temperature(self.config.temperature)
+                temp = _safe_temperature(self.config.temperatures[FINAL_HEAD])
                 probs = torch.softmax(final_logits / temp, dim=-1)
                 per_sample_conf = probs.max(dim=-1).values
                 return BatchedInferenceResult(
                     predictions=final_logits,
                     exit_taken=-1,
                     per_sample_confidence=per_sample_conf,
-                    computation_used=1.0,
+                    estimated_backbone_flops_fraction=1.0,
                 )
         finally:
             self._tls.inference_mode = False
@@ -243,13 +255,20 @@ class EarlyExitWrapper(nn.Module):
                     "without exit heads for compiled inference."
                 )
 
+            # a disabled exit never routes — not even at softmax confidence
+            # exactly 1.0 or entropy exactly 0.0. In training mode the head
+            # still produces logits (enablement is a routing concept; disabled
+            # heads keep training so they can be re-enabled later).
+            if not in_training and not self.config.enabled_exits[exit_idx]:
+                return output
+
             head = self.exit_heads[exit_name]
             logits = head(output)
             if in_training:
                 getattr(self._tls, "training_outputs", []).append(logits)
                 return output
 
-            temp = _safe_temperature(self.config.temperature)
+            temp = _safe_temperature(self.config.temperatures[exit_name])
             probs = torch.softmax(logits / temp, dim=-1)
             policy = self.config.routing_policy
 
@@ -323,19 +342,19 @@ class EarlyExitWrapper(nn.Module):
                         prediction=sig.prediction,
                         exit_taken=sig.exit_idx,
                         confidence=sig.confidence,
-                        computation_used=self._flops_at[layer_name],
+                        estimated_backbone_flops_fraction=self._flops_at[layer_name],
                     )
                 # no exit triggered — use final classifier (inside outer try so
                 # any exception still resets inference_mode)
                 final_logits = self._final_classifier(feats)
-                temp = _safe_temperature(self.config.temperature)
+                temp = _safe_temperature(self.config.temperatures[FINAL_HEAD])
                 probs = torch.softmax(final_logits / temp, dim=-1)
                 confidence = probs.max().item()
                 return InferenceResult(
                     prediction=final_logits,
                     exit_taken=-1,
                     confidence=confidence,
-                    computation_used=1.0,
+                    estimated_backbone_flops_fraction=1.0,
                 )
         finally:
             self._tls.inference_mode = False

@@ -120,3 +120,200 @@ def test_save_wrapper_warns_for_custom_backbone(tmp_path):
         save_wrapper(model, tmp_path / "m.pth")
     messages = [str(w.message) for w in captured if issubclass(w.category, UserWarning)]
     assert any("load_wrapper" in m for m in messages), messages
+
+
+# ---------------- checkpoint format v2 ----------------
+
+
+def test_checkpoint_v2_payload_shape(tmp_path):
+    """v2 files carry format_version, library version, and the full routing
+    config including exit points — the documented public contract."""
+    import torch
+
+    from earlyon import __version__
+    from earlyon.utils import build_model, save_wrapper
+
+    model = build_model("resnet18", num_classes=10, pretrained=False)
+    path = tmp_path / "v2.pth"
+    save_wrapper(model, path)
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    assert payload["format_version"] == 2
+    assert payload["earlyon_version"] == __version__
+    cfg = payload["config"]
+    assert cfg["enabled_exits"] == [True, True]
+    assert set(cfg["temperatures"]) == {"e0", "e1", "final"}
+    assert [p["layer_name"] for p in cfg["exit_points"]] == ["layer2", "layer3"]
+
+
+def test_v1_checkpoint_migrates_scalar_temperature_and_sentinels(tmp_path):
+    """Unversioned (v1) checkpoints must load: the scalar temperature is
+    broadcast per head, and the legacy 'disabled' sentinel (confidence 1.0 on
+    the active policy) becomes an explicit enabled_exits=False with a warning."""
+    import warnings as _warnings
+
+    import torch
+
+    from earlyon.utils import build_model, load_wrapper
+
+    model = build_model("resnet18", num_classes=10, pretrained=False)
+    path = tmp_path / "v1.pth"
+    payload = {
+        "state_dict": model.state_dict(),
+        "config": {
+            "backbone": "resnet18",
+            "num_classes": 10,
+            "routing_policy": "confidence",
+            "confidence_thresholds": [0.7, 1.0],  # 1.0 was the v1 disabled sentinel
+            "entropy_thresholds": [0.5, 0.5],
+            "loss_weights": [0.2, 0.3, 0.5],
+            "temperature": 1.7,
+        },
+    }
+    torch.save(payload, path)
+
+    with _warnings.catch_warnings(record=True) as captured:
+        _warnings.simplefilter("always")
+        loaded = load_wrapper(path)
+    assert loaded.config.temperatures == {"e0": 1.7, "e1": 1.7, "final": 1.7}
+    assert loaded.config.enabled_exits == [True, False]
+    messages = [str(w.message) for w in captured if issubclass(w.category, UserWarning)]
+    assert any("enabled_exits" in m for m in messages), messages
+
+
+def test_v1_checkpoint_entropy_sentinel_migrates(tmp_path):
+    """For an entropy-routed v1 checkpoint the disabled sentinel is 0.0."""
+    import torch
+
+    from earlyon.utils import build_model, load_wrapper
+
+    model = build_model("resnet18", num_classes=10, pretrained=False)
+    path = tmp_path / "v1e.pth"
+    payload = {
+        "state_dict": model.state_dict(),
+        "config": {
+            "backbone": "resnet18",
+            "num_classes": 10,
+            "routing_policy": "entropy",
+            "confidence_thresholds": [0.85, 0.80],
+            "entropy_thresholds": [0.4, 0.0],  # 0.0 was the v1 entropy disabled sentinel
+            "loss_weights": [0.2, 0.3, 0.5],
+            "temperature": 1.0,
+        },
+    }
+    torch.save(payload, path)
+    loaded = load_wrapper(path)
+    assert loaded.config.routing_policy == "entropy"
+    assert loaded.config.enabled_exits == [True, False]
+
+
+def test_v1_checkpoint_invalid_temperature_falls_back(tmp_path):
+    """A corrupt v1 temperature (NaN/negative) must not poison the load; it
+    falls back to 1.0 with a warning, matching the v1 runtime guard."""
+    import warnings as _warnings
+
+    import torch
+
+    from earlyon.utils import build_model, load_wrapper
+
+    model = build_model("resnet18", num_classes=10, pretrained=False)
+    path = tmp_path / "v1bad.pth"
+    payload = {
+        "state_dict": model.state_dict(),
+        "config": {
+            "backbone": "resnet18",
+            "num_classes": 10,
+            "confidence_thresholds": [0.7, 0.8],
+            "loss_weights": [0.2, 0.3, 0.5],
+            "temperature": float("nan"),
+        },
+    }
+    torch.save(payload, path)
+    with _warnings.catch_warnings(record=True) as captured:
+        _warnings.simplefilter("always")
+        loaded = load_wrapper(path)
+    assert loaded.config.temperatures == {"e0": 1.0, "e1": 1.0, "final": 1.0}
+    assert any("temperature" in str(w.message) for w in captured)
+
+
+def test_checkpoint_from_newer_format_rejected(tmp_path):
+    import pytest
+    import torch
+
+    from earlyon.utils import build_model, load_wrapper, save_wrapper
+
+    model = build_model("resnet18", num_classes=10, pretrained=False)
+    path = tmp_path / "future.pth"
+    save_wrapper(model, path)
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    payload["format_version"] = 99
+    torch.save(payload, path)
+    with pytest.raises(ValueError, match="format_version"):
+        load_wrapper(path)
+
+
+def test_malformed_checkpoint_rejected(tmp_path):
+    import pytest
+    import torch
+
+    from earlyon.utils import load_wrapper
+
+    path = tmp_path / "junk.pth"
+    torch.save({"weights": {}}, path)
+    with pytest.raises(ValueError, match="not an earlyon file"):
+        load_wrapper(path)
+
+
+def test_checkpoint_exit_point_mismatch_rejected(tmp_path):
+    """A v2 checkpoint whose recorded exit points disagree with the rebuilt
+    factory's placement must fail loudly instead of loading mis-wired routing."""
+    import pytest
+    import torch
+
+    from earlyon.utils import build_model, load_wrapper, save_wrapper
+
+    model = build_model("resnet18", num_classes=10, pretrained=False)
+    path = tmp_path / "moved.pth"
+    save_wrapper(model, path)
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    payload["config"]["exit_points"][0]["layer_name"] = "layer1"  # tampered placement
+    torch.save(payload, path)
+    with pytest.raises(ValueError, match="exit points"):
+        load_wrapper(path)
+
+
+def test_custom_checkpoint_loads_via_factory(tmp_path):
+    """custom_ee models round-trip when the caller supplies the factory."""
+    import torch
+
+    from earlyon.models import custom_ee
+    from earlyon.utils import load_wrapper, save_wrapper
+    from tests.fixtures.tiny_models import TinyBackbone
+
+    torch.manual_seed(0)
+
+    def factory():
+        return custom_ee(
+            TinyBackbone(num_classes=10),
+            exit_layers=["stage1", "stage2"],
+            num_classes=10,
+            input_shape=(1, 3, 32, 32),
+        )
+
+    model = factory()
+    model.config.confidence_thresholds = [0.42, 0.9]
+    model.config.enabled_exits = [True, False]
+    with torch.no_grad():
+        next(iter(model.exit_heads["e0"].parameters())).fill_(0.5)
+
+    path = tmp_path / "custom.pth"
+    import warnings as _warnings
+
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("ignore")  # the save-time custom_ee warning
+        save_wrapper(model, path)
+
+    loaded = load_wrapper(path, factory=factory)
+    assert loaded.config.confidence_thresholds == [0.42, 0.9]
+    assert loaded.config.enabled_exits == [True, False]
+    p = next(iter(loaded.exit_heads["e0"].parameters()))
+    assert torch.allclose(p, torch.full_like(p, 0.5))
