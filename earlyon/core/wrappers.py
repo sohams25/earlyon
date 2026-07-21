@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import threading
+import warnings
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Optional
 
 import torch
@@ -94,6 +95,7 @@ class EarlyExitWrapper(nn.Module):
         final_classifier: Callable[[torch.Tensor], torch.Tensor],
         config: EarlyExitConfig,
         input_shape: tuple[int, int, int, int] = (1, 3, 224, 224),
+        feature_adapters: Optional[Mapping[str, Callable[[Any], torch.Tensor]]] = None,
     ) -> None:
         super().__init__()
         self.backbone = backbone
@@ -110,6 +112,17 @@ class EarlyExitWrapper(nn.Module):
                 f"missing: {missing_heads}, unexpected: {extra_heads}"
             )
         self.config = config
+        # optional per-exit callables mapping a layer's raw output (tuple /
+        # dict / token tensor / ...) to the Tensor its head consumes. Keyed by
+        # exit name; NOT part of the state_dict — factories must rebuild them.
+        unknown_adapters = [
+            n for n in (feature_adapters or {}) if all(ep.name != n for ep in config.exit_points)
+        ]
+        if unknown_adapters:
+            raise ValueError(f"feature_adapters keyed by unknown exit name(s): {unknown_adapters}")
+        self._feature_adapters: dict[str, Callable[[Any], torch.Tensor]] = dict(
+            feature_adapters or {}
+        )
 
         # ordered list of (exit_idx, exit_name, layer_name)
         self._exits = [(i, ep.name, ep.layer_name) for i, ep in enumerate(config.exit_points)]
@@ -151,15 +164,31 @@ class EarlyExitWrapper(nn.Module):
         """
         if self._flops_estimate is None:
             layer_names = [ep.layer_name for ep in self.config.exit_points]
-            # device-neutral probe: the analysis input is created on CPU, so
-            # run it against the backbone wherever it currently lives.
+            # the probe input follows the backbone wherever it currently lives
             device = next(self.backbone.parameters(), torch.empty(0)).device
-            self._flops_estimate = estimate_layer_flops(
-                self.backbone,
-                layer_names,
-                self._input_shape,
-                device=str(device),
-            )
+            try:
+                self._flops_estimate = estimate_layer_flops(
+                    self.backbone,
+                    layer_names,
+                    self._input_shape,
+                    device=str(device),
+                )
+            except Exception as exc:  # backbone can't run from zeros(input_shape)
+                from earlyon.core.flops import METHOD_UNIFORM
+
+                warnings.warn(
+                    f"FLOPs analysis failed ({type(exc).__name__}: {exc}); using a "
+                    "low-confidence uniform estimate (FlopsEstimate.reliable=False)",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                n = len(layer_names)
+                self._flops_estimate = FlopsEstimate(
+                    fractions={nm: (i + 1) / (n + 1) for i, nm in enumerate(layer_names)},
+                    method=METHOD_UNIFORM,
+                    reliable=False,
+                    notes=(f"analysis failed: {type(exc).__name__}",),
+                )
         return self._flops_estimate
 
     @property
@@ -294,8 +323,10 @@ class EarlyExitWrapper(nn.Module):
             if not in_training and not self.config.enabled_exits[exit_idx]:
                 return output
 
+            adapter = self._feature_adapters.get(exit_name)
+            features = adapter(output) if adapter is not None else output
             head = self.exit_heads[exit_name]
-            logits = head(output)
+            logits = head(features)
             if in_training:
                 getattr(self._tls, "training_outputs", []).append(logits)
                 return output
