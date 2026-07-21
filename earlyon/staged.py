@@ -29,6 +29,7 @@ on a probe input before returning. See ``docs/STAGED_DEPLOYMENT.md``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 import torch
 import torch.nn as nn
@@ -113,7 +114,8 @@ class StagedModel(nn.Module):
             ep = cfg.exit_points[idx]
             if not cfg.enabled_exits[idx]:
                 # skip the head entirely; still run the trunk to continue
-                features = self.stages[idx].trunk(features)
+                stage = cast(Stage, self.stages[idx])
+                features = stage.trunk(features)
                 continue
             features, logits = self.stages[idx](features)
             temp = _safe_temperature(cfg.temperatures[ep.name])
