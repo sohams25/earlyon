@@ -26,10 +26,13 @@ from earlyon.models import resnet50_ee
 model = resnet50_ee(num_classes=10, pretrained=True).eval()
 result = model(torch.randn(1, 3, 224, 224), mode="inference")
 
-result.exit_taken        # which head answered; -1 means the full network ran
-result.computation_used  # fraction of the network's FLOPs actually spent
-result.confidence        # softmax confidence at the point it answered
+result.exit_taken                           # which head answered; -1 = full network
+result.estimated_backbone_flops_fraction    # static estimate, not a measurement
+result.confidence                           # softmax confidence where it answered
 ```
+
+earlyon is a research-to-deployment toolkit. Its primary target is batch-1,
+latency-sensitive inference; batched routing exists but is conservative.
 
 <p align="center">
   <img src="assets/demo.svg" alt="earlyon demo: an easy image exits at the first head using 12% of the FLOPs, a hard image runs the whole network" width="100%">
@@ -92,33 +95,49 @@ model = custom_ee(backbone, exit_layers=["layer2", "layer3"], num_classes=10)
 Routing has two policies. `"confidence"` (default) exits when
 `softmax(logits).max() >= threshold`; `"entropy"` exits when the softmax
 entropy drops below a threshold, which reads the whole distribution instead
-of just the top class. Calibration and `save_wrapper`/`load_wrapper` are
-policy-aware, so a calibrated entropy model reloads as one.
+of just the top class. Whether an exit may fire at all is an explicit
+per-exit boolean (`enabled_exits`) — a disabled exit can never fire, not
+even at softmax confidence exactly 1.0. Calibration and
+`save_wrapper`/`load_wrapper` are policy-aware, so a calibrated entropy
+model reloads as one; checkpoints carry a versioned schema (v2) and older
+files migrate with a warning.
 
 Training is two-stage by default: train the backbone exactly as you already
 do, freeze it (parameters and BatchNorm stats), then train the small heads
 for a few epochs. `joint_train_backbone_and_exits` does end-to-end training
 instead when you want the last bit of accuracy and have the budget.
 Temperature scaling (Guo et al. 2017) can be fit before calibration to fix
-the usual softmax over-confidence; pass `fit_temperature=True`.
+the usual softmax over-confidence; pass `fit_temperature=True` and each head
+— every exit and the final classifier — gets its own fitted temperature.
+The full split discipline (what may touch which data) is written down in
+[`docs/CALIBRATION_AND_BENCHMARK_CONTRACT.md`](docs/CALIBRATION_AND_BENCHMARK_CONTRACT.md).
 
-## Measured results
+## Measured results (legacy: earlyon v0.2 methodology)
 
 CIFAR-10, trained on an RTX 4050 Laptop GPU (6 GB) from ImageNet-pretrained
 weights: 3–4 epochs for the backbone, 3–4 for the exit heads, thresholds
-calibrated to a 1% accuracy budget.
+calibrated to a 1% accuracy budget. **These runs predate v0.3**: they used a
+single shared temperature and the pre-fair-runner benchmark; treat them as
+indicative, not as v0.3 results. Regenerate with
+`python scripts/run_benchmarks.py` (records land in
+`docs/benchmarks.json` under `runs`; these live under `legacy_v0_2`).
 
-| Model       | Test Acc | Baseline Acc | Avg FLOPs Used | % exited early |
-|-------------|---------:|-------------:|---------------:|---------------:|
-| ResNet18    |   94.42% |       96.32% |         89.88% |          35.3% |
-| ResNet50    |   95.88% |       97.60% |         81.42% |          58.2% |
-| MobileNetV2 |   93.31% |       95.08% |         93.90% |           8.5% |
+| Model       | Test Acc | Baseline Acc | Est. FLOPs fraction | % exited early |
+|-------------|---------:|-------------:|--------------------:|---------------:|
+| ResNet18    |   94.42% |       96.32% |              89.88% |          35.3% |
+| ResNet50    |   95.88% |       97.60% |              81.42% |          58.2% |
+| MobileNetV2 |   93.31% |       95.08% |              93.90% |           8.5% |
 
-Avg FLOPs Used is measured on the real test set, per image. It is the number
-I'd want to see, so it's the one the tool reports. For ResNet50 that means
-~19% of the compute gone for a 1.7% accuracy cost, with 58% of images never
-reaching `layer4`. Wall-clock speedup is hardware- and input-dependent; see
-the [latency appendix](#appendix-wall-clock-latency) before quoting one.
+The FLOPs fraction is a per-image *estimate* over the real test set — a
+static analysis of the backbone that excludes the exit heads' own small cost
+and all routing overhead. For ResNet50 it reads as ~19% of estimated compute
+gone for a 1.7% accuracy cost, with 58% of images never reaching `layer4`.
+An estimated FLOPs saving is not a latency claim: wall-clock speedup is
+hardware- and input-dependent; see the
+[latency appendix](#appendix-wall-clock-latency-legacy) before quoting one.
+When judging a deployment, also benchmark a smaller static model at matched
+accuracy (pass it as a third entry to `benchmark_models`) — if a plain
+ResNet18 matches your routed ResNet50, ship the ResNet18.
 
 The MobileNetV2 row is a loss, and it's in the table anyway. An
 already-compressed backbone leaves little for early exit to skim: only 8.5%
@@ -238,19 +257,31 @@ The reasoning for each choice, including the ugly parts, is in
 
 ## Limitations
 
-- `forward(mode="inference")` is batch-size 1. `forward_inference_batched`
-  handles batches, but conservatively (see above); masked per-sample routing
-  inside a batch is on the roadmap.
+- `forward(mode="inference")` is batch-size 1 — the latency-sensitive edge
+  case earlyon targets. `forward_inference_batched` handles batches, but
+  conservatively (see above); masked per-sample routing inside a batch is on
+  the roadmap.
+- Eager routing has real overhead: every enabled exit evaluates its head and
+  synchronises the host (`.item()`) to decide. On a GPU that synchronisation
+  can cost more than the skipped layers save, particularly on small
+  backbones — theoretical FLOP savings do not guarantee latency savings.
+  The fair runner reports both so you can see it.
 - `torch.compile` cannot trace the routing control flow. The wrapper raises a
   clear error instead of silently falling back; compile the raw backbone if
   you need it.
-- ONNX export writes a static graph that computes every exit and leaves
-  routing to the caller. The per-sample compute saving only exists in the
-  PyTorch wrapper.
+- ONNX export (`export_all_exits_to_onnx`) writes a static graph that
+  computes **every** exit and leaves routing to the caller — it does not
+  short-circuit compute. For a deployable split that genuinely skips later
+  stages, see [`docs/STAGED_DEPLOYMENT.md`](docs/STAGED_DEPLOYMENT.md)
+  (reference implementation for Sequential backbones).
+- `computation_used` / `estimated_backbone_flops_fraction` is a static
+  estimate: exit-head cost and routing overhead excluded; backbones that
+  reuse modules degrade to a warned low-confidence uniform estimate.
 - Compute budgets from `calibrate_thresholds_for_budget` hold as an average
   over the calibration distribution. Nothing caps FLOPs per sample.
-- Benchmarks are CIFAR-10 on a laptop GPU. ImageNet-scale numbers and a real
-  Jetson table don't exist yet; treat any wall-clock claim accordingly.
+- Benchmarks are CIFAR-10 on a laptop GPU, and the published table predates
+  the v0.3 fair runner (see the legacy labels). ImageNet-scale numbers and a
+  real Jetson table don't exist yet; treat any wall-clock claim accordingly.
 
 ## Contributing
 
@@ -291,7 +322,12 @@ BranchyNet (Teerapittayanon et al. 2016) and the ACM 2024 early-exit survey
 (10.1145/3698767) for the ideas; torchvision (BSD) for the backbones; fvcore
 for FLOPs accounting. earlyon itself is MIT.
 
-## Appendix: wall-clock latency
+## Appendix: wall-clock latency (legacy)
+
+**Legacy numbers**: measured with the pre-v0.3 runner, which benchmarked the
+wrapper and backbone on *different* random inputs — not methodologically
+comparable to `benchmark_models` results, which feed every compared model
+the identical sample sequence. Kept for transparency until re-measured.
 
 Throughput below uses a random-noise input, which can trigger spurious early
 exits, so read it as a best-case bound rather than a claim. RTX 4050 Laptop

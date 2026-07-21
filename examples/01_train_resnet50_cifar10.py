@@ -45,14 +45,18 @@ def main():
         model, train_loader, epochs=args.epochs_stage2, lr=1e-3, device=device,
     )
 
+    # Thresholds are chosen on the VALIDATION split only; the accuracies
+    # printed below are validation numbers. Report the deployable accuracy
+    # from the held-out test loader (earlyon.benchmarking.evaluate) — the
+    # threshold search must never consume test labels.
     print("calibrating thresholds on validation set")
     result = calibrate_thresholds(
         model, val_loader, target_accuracy_drop=0.01, device=device,
     )
-    print(f"thresholds: {result.thresholds}")
-    print(f"baseline acc: {result.baseline_accuracy:.4f}  "
-          f"final acc: {result.final_accuracy:.4f}  "
-          f"avg compute: {result.avg_computation_used:.4f}")
+    print(f"thresholds: {result.thresholds}  enabled: {result.enabled_exits}")
+    print(f"val baseline acc: {result.baseline_accuracy:.4f}  "
+          f"val routed acc: {result.final_accuracy:.4f}  "
+          f"est. FLOPs fraction: {result.avg_computation_used:.4f}")
 
     save_wrapper(model, args.output)
     print(f"saved {args.output}")

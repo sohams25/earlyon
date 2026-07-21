@@ -4,7 +4,78 @@ format follows [keep a changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## unreleased
 
+### changed — calibration & routing correctness (breaking-ish, migrated)
+- **per-head temperatures**: `EarlyExitConfig.temperatures` maps every head
+  (each exit and the final classifier) to its own fitted temperature; routing
+  applies the right one at each exit. Previously one temperature was fit from
+  the final classifier's logits and reused everywhere. The legacy scalar
+  `temperature` remains as a constructor convenience (broadcast at
+  construction) and in v1 checkpoints (migrated on load).
+- **explicit exit enablement**: `EarlyExitConfig.enabled_exits` replaces the
+  threshold sentinels (confidence `1.0` / entropy `0.0`). A disabled exit can
+  no longer fire on a float-saturated softmax (confidence exactly 1.0 /
+  entropy exactly 0.0); its head is not even evaluated at inference. v1
+  checkpoints migrate sentinels to explicit flags with a warning.
+- **centralized config validation**: `EarlyExitConfig.validate()` checks
+  every invariant (unique non-empty exit/layer names, threshold ranges,
+  finite positive temperatures, loss-weight shape, enablement length) and is
+  re-invoked at wrapper construction and checkpoint load. Invalid negative
+  temperatures now raise instead of being clamped to `1e-6` (which produced
+  an artificially razor-sharp softmax).
+- **staged calibration pipeline**: collect logits once
+  (`collect_head_logits`), fit per-head temperatures with convergence status
+  (`fit_head_temperatures` / `TemperatureFitResult`), greedy grid search on
+  the cache, evaluate. `CalibrationResult` now reports enablement, exit
+  distribution, sample count, accuracy delta, objective, the honest method
+  name (`greedy-coordinate-grid`) and a schema version. Exits that never fire
+  on the calibration set stay disabled instead of shipping enabled-but-idle.
+  Empty calibration loaders raise immediately.
+- **checkpoint format v2**: `format_version`, library version, exit-point
+  metadata (cross-checked against the rebuilt factory on load), enablement
+  and per-head temperatures. v1 files migrate deterministically with
+  warnings; files from a newer format are rejected; `custom_ee` models
+  reload via `load_wrapper(path, factory=...)`.
+- **fair benchmark runner**: `benchmark_models` measures every compared
+  model (backbone, wrapper, static baseline, quantised variant) on the exact
+  same preloaded sample sequence with identical warmup, boundary
+  (`model-only` vs `end-to-end`, labelled) and synchronization; reports
+  accuracy alongside speed for labelled loaders. The legacy helpers delegate
+  to it. `docs/benchmarks.json` quarantines pre-v0.3 records under
+  `legacy_v0_2` as not methodologically comparable.
+- **honest compute accounting**: `InferenceResult.computation_used` renamed
+  to `estimated_backbone_flops_fraction` (read alias kept). The estimator
+  (`FlopsEstimate`) carries method/reliability/notes, explicitly excludes
+  exit-head cost and routing overhead, detects reused modules (degrading to
+  a warned low-confidence uniform fallback), and runs lazily so ViT
+  construction is fast.
+- package description: "production-ready" → "deployment-oriented" — the
+  README states the primary use case (batch-1 latency-sensitive inference)
+  and labels pre-v0.3 benchmark numbers as legacy.
+
 ### added
+- **staged deployment** (`earlyon.staged`): a documented protocol (ordered
+  stages emitting continuation features + exit logits, routing between
+  stages) with a verified reference splitter for Sequential backbones —
+  staged execution provably matches eager routing and genuinely skips later
+  stages, unlike the static multi-output ONNX export (now also available
+  under the explicit name `export_all_exits_to_onnx`). See
+  `docs/STAGED_DEPLOYMENT.md`.
+- **Jetson monitoring fixes + energy semantics**: `TegrastatsMonitor` is
+  restartable (the stop event is cleared on start; previously a restarted
+  monitor silently collected nothing), no-ops on double start, closes its
+  pipes, and degrades cleanly when tegrastats can't spawn. Missing telemetry
+  parses to `None` instead of invented zeros. `integrate_energy` /
+  `EnergySummary` distinguish instantaneous power, window-average power and
+  trapezoid-integrated energy; energy-per-inference is only reported when a
+  real integral and inference count exist (`profile_with_energy`).
+- **custom_ee**: `example_args`/`example_kwargs` for the inspection forward,
+  device inference from the backbone's parameters (no more CPU probe of a
+  CUDA model), per-layer `feature_extractors` for tuple/dict/odd-rank
+  outputs (applied in the dry run and the routing hook), and dry-run
+  validation that every exit layer executes exactly once and in the listed
+  forward order.
+- `docs/CALIBRATION_AND_BENCHMARK_CONTRACT.md`: the split discipline,
+  calibration stages, estimator limitations and benchmark fairness rules.
 - **compute-budget calibration**: `calibrate_thresholds_for_budget` /
   `earlyon calibrate --target-compute`, the mirror of the accuracy-budget
   search. State the average FLOPs fraction the deployed model may use (e.g.
