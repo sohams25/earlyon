@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Optional
 import torch
 import torch.nn as nn
 
-from earlyon.core.flops import per_layer_flops
+from earlyon.core.flops import FlopsEstimate, estimate_layer_flops
 from earlyon.core.types import FINAL_HEAD, EarlyExitConfig, InferenceResult
 
 if TYPE_CHECKING:
@@ -114,9 +114,12 @@ class EarlyExitWrapper(nn.Module):
         # ordered list of (exit_idx, exit_name, layer_name)
         self._exits = [(i, ep.name, ep.layer_name) for i, ep in enumerate(config.exit_points)]
 
-        # cumulative FLOPs fraction at each exit layer
-        layer_names = [ep.layer_name for ep in config.exit_points]
-        self._flops_at: dict[str, float] = per_layer_flops(backbone, layer_names, input_shape)
+        # cumulative estimated FLOPs fraction at each exit layer — computed
+        # LAZILY on first use (the analysis runs forward passes of the
+        # backbone; doing it here made construction of large models like ViT
+        # unacceptably slow). See `flops_estimate` / `_flops_at`.
+        self._input_shape = input_shape
+        self._flops_estimate: Optional["FlopsEstimate"] = None
 
         # per-thread caches: a single wrapper instance can be called from
         # multiple threads (DataParallel, inference servers). state lives in
@@ -135,6 +138,34 @@ class EarlyExitWrapper(nn.Module):
         self._register_hooks()
 
     # ---------------- public api ----------------
+
+    @property
+    def flops_estimate(self) -> FlopsEstimate:
+        """The lazy per-exit FLOPs estimate, with estimator metadata.
+
+        Computed on first access (one/two backbone forward passes) and cached.
+        Must be materialised *outside* an active routing pass: the analysis
+        runs the backbone directly, and the hooks stay no-ops only while this
+        thread's inference/training flags are unset — which is why the forward
+        paths call it before flipping those flags.
+        """
+        if self._flops_estimate is None:
+            layer_names = [ep.layer_name for ep in self.config.exit_points]
+            # device-neutral probe: the analysis input is created on CPU, so
+            # run it against the backbone wherever it currently lives.
+            device = next(self.backbone.parameters(), torch.empty(0)).device
+            self._flops_estimate = estimate_layer_flops(
+                self.backbone,
+                layer_names,
+                self._input_shape,
+                device=str(device),
+            )
+        return self._flops_estimate
+
+    @property
+    def _flops_at(self) -> dict[str, float]:
+        """Cumulative estimated FLOPs fraction per exit layer (lazy)."""
+        return self.flops_estimate.fractions
 
     def forward(
         self, x: torch.Tensor, mode: str = "inference"
@@ -184,6 +215,7 @@ class EarlyExitWrapper(nn.Module):
         if x.size(0) < 1:
             raise ValueError("empty batch")
 
+        _ = self.flops_estimate  # materialise BEFORE the routing flags flip
         self._init_tls()
         self._tls.inference_mode = True
         self._tls.batched_mode = True
@@ -328,6 +360,7 @@ class EarlyExitWrapper(nn.Module):
             self._tls.in_training = False
 
     def _forward_inference(self, x: torch.Tensor) -> InferenceResult:
+        _ = self.flops_estimate  # materialise BEFORE the routing flags flip
         self._init_tls()
         self._tls.inference_mode = True
         try:
