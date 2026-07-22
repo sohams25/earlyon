@@ -53,6 +53,15 @@ format follows [keep a changelog](https://keepachangelog.com/en/1.1.0/).
   and labels pre-v0.3 benchmark numbers as legacy.
 
 ### added
+- **release-readiness verification**: independent adversarial audit tests
+  (`tests/test_release_audit.py`) including a global-vs-per-head temperature
+  counterfactual, batched-path per-head temperatures, NaN-head safety,
+  calibration determinism, and structural proof that the staged runtime
+  skips later stages; a genuine v0.2-written checkpoint fixture pinning the
+  v1→v2 migration; a post-install wheel smoke script
+  (`scripts/smoke_test.py`); a bounded seeded CUDA evidence runner
+  (`scripts/evidence_run.py`); `MANIFEST.in` so the sdist stops shipping a
+  partial test tree; `SECURITY_REVIEW.md` and `docs/MIGRATION.md`.
 - **staged deployment** (`earlyon.staged`): a documented protocol (ordered
   stages emitting continuation features + exit logits, routing between
   stages) with a verified reference splitter for Sequential backbones —

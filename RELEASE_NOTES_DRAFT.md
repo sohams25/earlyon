@@ -50,6 +50,27 @@ retired in favor of "deployment-oriented").
 - Lazy `FlopsEstimate` with provenance; reused-module detection.
 - `docs/CALIBRATION_AND_BENCHMARK_CONTRACT.md`.
 
+## Release-readiness verification (post-hardening audit)
+
+The hardening claims were re-verified independently on
+`claude/earlyon-release-readiness`:
+
+- adversarial tests added, including the decisive counterfactual that a
+  single global temperature misroutes where per-head temperatures do not,
+  batched-path per-head temperatures, NaN-emitting heads, calibration
+  determinism, and structural proof that the staged runtime skips later
+  stages;
+- v1→v2 checkpoint migration verified against a **genuine** v0.2-written
+  fixture (`tests/fixtures/v1_cifar_resnet20.pth`), not a hand-built dict;
+- wheel + sdist build `twine`-clean; wheel installed into a clean venv and
+  smoked from outside the repo (`scripts/smoke_test.py`); sdist no longer
+  ships a partial test tree;
+- a bounded, seeded CUDA evidence run (`scripts/evidence_run.py`) on
+  CIFAR-10 with disjoint train/temperature/calibration/test splits and a
+  static MobileNetV2 baseline — results in `docs/evidence/`;
+- security review in `SECURITY_REVIEW.md`; migration guide in
+  `docs/MIGRATION.md`.
+
 ## Release checklist (when actually releasing)
 
 - [ ] bump `__version__` and `pyproject.toml` to 0.3.0; move `unreleased` in
