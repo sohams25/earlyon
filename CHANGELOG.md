@@ -61,7 +61,7 @@ format follows [keep a changelog](https://keepachangelog.com/en/1.1.0/).
   v1→v2 migration; a post-install wheel smoke script
   (`scripts/smoke_test.py`); a bounded seeded CUDA evidence runner
   (`scripts/evidence_run.py`); `MANIFEST.in` so the sdist stops shipping a
-  partial test tree; `SECURITY_REVIEW.md` and `docs/MIGRATION.md`.
+  partial test tree; `docs/SECURITY_MODEL.md` and `docs/MIGRATION.md`.
 - **staged deployment** (`earlyon.staged`): a documented protocol (ordered
   stages emitting continuation features + exit logits, routing between
   stages) with a verified reference splitter for Sequential backbones —

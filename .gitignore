@@ -49,6 +49,3 @@ raw_earlyon.md
 logs/
 docs/*.pth
 
-# local agent config, never ship
-CLAUDE.md
-.claude/
