@@ -1,8 +1,7 @@
-# Security review — earlyon 0.3 release candidate
+# Security model
 
-Date: 2026-07-22. Scope: the `earlyon` package, scripts, tests, docs and
-packaged artifacts on the v0.3.0 release-readiness branch (merged to
-`main` via PR #5).
+Scope: the `earlyon` package, scripts, tests, docs and packaged artifacts
+as of v0.3.0. This is a project self-review, not an external audit.
 
 ## Checkpoint trust assumptions
 
@@ -57,17 +56,12 @@ packaged artifacts on the v0.3.0 release-readiness branch (merged to
 - Tests use `tmp_path`/`TemporaryDirectory`; no world-writable fixed paths.
 - No archive extraction is performed by earlyon itself.
 
-## Scan results (this review)
+## Packaging boundaries
 
-- No credentials, API keys, tokens or private keys in the tree.
-- No private/internal paths, employer identifiers, or non-public material.
-  The author contact in `pyproject.toml` is deliberate public metadata.
-- Coverage output, datasets, build artifacts (`htmlcov/`, `data/`, `dist/`,
-  `.coverage`) are gitignored and untracked.
 - The wheel contains only the `earlyon` package; the sdist prunes `tests/`
-  (`MANIFEST.in`), so the binary fixture ships in neither artifact.
+  (`MANIFEST.in`), so the binary test fixture ships in neither artifact.
 
 ## Reporting
 
-Vulnerabilities: follow `SECURITY.md` (private disclosure; do not open
-public issues for security reports).
+Vulnerabilities: follow [`SECURITY.md`](../SECURITY.md) (private
+disclosure; do not open public issues for security reports).

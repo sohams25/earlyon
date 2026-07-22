@@ -7,7 +7,7 @@
   <img alt="python" src="https://img.shields.io/badge/python-3.10+-blue">
   <img alt="coverage" src="https://img.shields.io/badge/coverage-95%25-brightgreen">
   <img alt="mypy" src="https://img.shields.io/badge/mypy-strict-blue">
-  <img alt="version" src="https://img.shields.io/badge/version-0.3.0-lightgrey">
+  <a href="https://pypi.org/project/earlyon/"><img alt="pypi" src="https://img.shields.io/pypi/v/earlyon"></a>
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
 </p>
 
@@ -46,15 +46,15 @@ result.confidence                        # softmax confidence where it answered
 
 ## Install
 
-PyPI publication is pending trusted-publisher configuration. The v0.3.0
-GitHub tag is the current installable release:
+```bash
+pip install earlyon==0.3.0
+```
+
+Or from the GitHub tag:
 
 ```bash
 pip install git+https://github.com/sohams25/earlyon@v0.3.0
 ```
-
-(Once PyPI publication completes, `pip install earlyon==0.3.0` will work;
-until then it does not.)
 
 From source for development:
 

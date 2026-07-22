@@ -58,7 +58,6 @@ manual, human decision — never automated.
 - [ ] Import + CLI smoke test from that venv (same commands as §3)
 - [ ] Create the GitHub release from the tag, pasting the CHANGELOG section:
       `gh release create vX.Y.Z --notes-file <(sed -n '/X.Y.Z/,/^## /p' CHANGELOG.md)`
-- [ ] Announce (see `docs/marketing/`)
 
 ## If something went wrong
 
