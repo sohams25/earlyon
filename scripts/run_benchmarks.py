@@ -9,7 +9,6 @@ Usage:
 
 import argparse
 import json
-import os
 import sys
 import time
 import traceback
@@ -20,10 +19,10 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from earlyon.benchmarking import benchmark_models, evaluate
-from earlyon.core.thresholds import calibrate_thresholds
-from earlyon.training import stage1_train_backbone, stage2_train_exits
-from earlyon.utils import build_model, cifar10_loaders, save_wrapper
+from earlyon.benchmarking import benchmark_models, evaluate  # noqa: E402
+from earlyon.core.thresholds import calibrate_thresholds  # noqa: E402
+from earlyon.training import stage1_train_backbone, stage2_train_exits  # noqa: E402
+from earlyon.utils import build_model, cifar10_loaders, save_wrapper  # noqa: E402
 
 METHODOLOGY = "v0.3-fair-runner"
 
@@ -33,9 +32,9 @@ OUT_JSON = OUT_DIR / "benchmarks.json"
 
 # fine-tuning from imagenet pretrained -- a few epochs is enough for cifar10
 PLAN = {
-    "resnet18":    {"batch": 128, "stage1_epochs": 4, "stage2_epochs": 4, "lr1": 0.005},
-    "resnet50":    {"batch":  32, "stage1_epochs": 3, "stage2_epochs": 3, "lr1": 0.005},
-    "mobilenetv2": {"batch":  32, "stage1_epochs": 4, "stage2_epochs": 4, "lr1": 0.002},
+    "resnet18": {"batch": 128, "stage1_epochs": 4, "stage2_epochs": 4, "lr1": 0.005},
+    "resnet50": {"batch": 32, "stage1_epochs": 3, "stage2_epochs": 3, "lr1": 0.005},
+    "mobilenetv2": {"batch": 32, "stage1_epochs": 4, "stage2_epochs": 4, "lr1": 0.002},
 }
 
 
@@ -52,17 +51,21 @@ def run_one(backbone: str) -> dict:
     print(f"{log_prefix} starting on {device_name()}", flush=True)
 
     train_loader, val_loader, test_loader = cifar10_loaders(
-        batch_size=cfg["batch"], num_workers=2,
+        batch_size=cfg["batch"],
+        num_workers=2,
     )
     model = build_model(backbone, num_classes=10, pretrained=True)
 
     t0 = time.time()
     print(f"{log_prefix} stage1: {cfg['stage1_epochs']} epochs", flush=True)
     stage1_train_backbone(
-        model.backbone, train_loader,
-        epochs=cfg["stage1_epochs"], lr=cfg["lr1"], device=device,
-        on_epoch_end=lambda l: print(
-            f"{log_prefix} s1 e{l.epoch}: loss={l.loss:.4f} acc={l.accuracy:.4f}",
+        model.backbone,
+        train_loader,
+        epochs=cfg["stage1_epochs"],
+        lr=cfg["lr1"],
+        device=device,
+        on_epoch_end=lambda log: print(
+            f"{log_prefix} s1 e{log.epoch}: loss={log.loss:.4f} acc={log.accuracy:.4f}",
             flush=True,
         ),
     )
@@ -71,11 +74,14 @@ def run_one(backbone: str) -> dict:
     t0 = time.time()
     print(f"{log_prefix} stage2: {cfg['stage2_epochs']} epochs", flush=True)
     stage2_train_exits(
-        model, train_loader,
-        epochs=cfg["stage2_epochs"], lr=1e-3, device=device,
-        on_epoch_end=lambda l: print(
-            f"{log_prefix} s2 e{l.epoch}: loss={l.loss:.4f} mean_acc={l.accuracy:.4f} "
-            f"per_exit={l.per_exit_accuracy}",
+        model,
+        train_loader,
+        epochs=cfg["stage2_epochs"],
+        lr=1e-3,
+        device=device,
+        on_epoch_end=lambda log: print(
+            f"{log_prefix} s2 e{log.epoch}: loss={log.loss:.4f} mean_acc={log.accuracy:.4f} "
+            f"per_exit={log.per_exit_accuracy}",
             flush=True,
         ),
     )
@@ -84,7 +90,10 @@ def run_one(backbone: str) -> dict:
     print(f"{log_prefix} calibrating thresholds", flush=True)
     t0 = time.time()
     calib = calibrate_thresholds(
-        model, val_loader, target_accuracy_drop=0.01, device=device,
+        model,
+        val_loader,
+        target_accuracy_drop=0.01,
+        device=device,
     )
     t_calib = time.time() - t0
     print(
@@ -109,12 +118,18 @@ def run_one(backbone: str) -> dict:
     print(f"{log_prefix} fair throughput (real input)", flush=True)
     cmp_real = benchmark_models(
         {"early_exit": model, "backbone": model.backbone},
-        loader=test_loader, device=device, num_warmup=50, num_runs=300,
+        loader=test_loader,
+        device=device,
+        num_warmup=50,
+        num_runs=300,
     )
     print(f"{log_prefix} fair throughput (noise input)", flush=True)
     cmp_noise = benchmark_models(
         {"early_exit": model, "backbone": model.backbone},
-        input_shape=(1, 3, 224, 224), device=device, num_warmup=50, num_runs=300,
+        input_shape=(1, 3, 224, 224),
+        device=device,
+        num_warmup=50,
+        num_runs=300,
     )
 
     save_wrapper(model, OUT_DIR / f"{backbone}_cifar10.pth")
