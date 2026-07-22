@@ -149,6 +149,25 @@ Reproduce with `python scripts/run_benchmarks.py` (trains and benchmarks) or
 `python scripts/re_evaluate.py` (from checkpoints). Raw numbers live in
 [`docs/benchmarks.json`](docs/benchmarks.json).
 
+## Measured results (v0.3 fair runner — bounded evidence run)
+
+One seeded, deliberately small validation run (2 epochs per stage, RTX 4050
+Laptop GPU, CIFAR-10 at 224px, disjoint train/temperature/calibration/test
+splits, identical samples and boundaries for all three models). Full data
+and honest interpretation: [`docs/evidence/CUDA_EVIDENCE.md`](docs/evidence/CUDA_EVIDENCE.md).
+
+| Model | Test acc | p50 | p95 | Throughput | Est. FLOPs fraction |
+|---|---:|---:|---:|---:|---:|
+| ResNet-18 backbone | 94.07% | 1.33 ms | 1.51 ms | 712 ips | 1.00 |
+| ResNet-18 early-exit | 92.92% | 1.43 ms | 1.46 ms | 782 ips (**1.10×**) | 0.88 (estimate) |
+| MobileNetV2 static baseline | 92.67% | 1.40 ms | 1.48 ms | 702 ips (0.99×) | 1.00 |
+
+Read the negative parts too: the early-exit **median** latency is worse than
+the backbone's (routing overhead on the 70% of images that don't exit); the
+gain is in throughput and the tail (p95/p99), and the static baseline is
+competitive at this training budget. That's the honest shape of early exit
+on a fast GPU — reproduce with `python scripts/evidence_run.py`.
+
 ## How it compares
 
 Compression makes the model cheaper for every input; early exit spends

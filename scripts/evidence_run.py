@@ -83,9 +83,12 @@ def loaders(root: str, image_size: int = 224, batch_size: int = 128):
     )
     return {
         "train": mk(train_full, train_idx, batch_size, True),
+        # MobileNetV2 activations at 224px don't fit a 6 GB GPU at batch 128;
+        # the baseline trains with a smaller batch (recorded in the output)
+        "train_small_batch": mk(train_full, train_idx, 32, True),
         "temperature": mk(eval_train, temp_idx, batch_size, False),
         "calibration": mk(eval_train, calib_idx, batch_size, False),
-        "test_batched": DataLoader(test, batch_size=batch_size, num_workers=2),
+        "test_batched": DataLoader(test, batch_size=64, num_workers=2),
         "test_b1": DataLoader(test, batch_size=1, num_workers=2, pin_memory=True),
         "counts": {
             "train": len(train_idx),
@@ -145,12 +148,22 @@ def main() -> None:
     budget_check("baseline")
 
     # ---- static smaller baseline: MobileNetV2 backbone ----
+    # free the early-exit model's GPU residency first (6 GB card)
+    model = model.cpu()
+    torch.cuda.empty_cache()
     baseline = build_model("mobilenetv2", num_classes=10, pretrained=True)
     t0 = time.time()
     stage1_train_backbone(
-        baseline.backbone, data["train"], epochs=args.epochs_baseline, lr=0.002, device=device
+        baseline.backbone,
+        data["train_small_batch"],
+        epochs=args.epochs_baseline,
+        lr=0.002,
+        device=device,
     )
     log["stages"]["baseline_seconds"] = round(time.time() - t0, 1)
+    log["stages"]["baseline_batch_size"] = 32
+    baseline = baseline.cpu()
+    torch.cuda.empty_cache()
     budget_check("calibration")
 
     # ---- calibration: temperatures on the temperature split, thresholds on
