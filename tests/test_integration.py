@@ -98,9 +98,9 @@ def test_pipeline_custom_token_entropy_joint_calibrate_onnx(tmp_path):
     report = evaluate(model, _loader1(), device="cpu")
     assert set(report.exit_distribution).issubset({"exit_0", "exit_1", "final"})
 
-    # custom models save the state_dict but can't be rebuilt via load_wrapper
+    # custom models save the state_dict but can't be rebuilt without a factory
     save_wrapper(model, tmp_path / "c.pth")
-    with pytest.raises(NotImplementedError, match="custom_ee"):
+    with pytest.raises(ValueError, match="factory"):
         load_wrapper(tmp_path / "c.pth")
 
     # ONNX export still works (the token/3D head path)

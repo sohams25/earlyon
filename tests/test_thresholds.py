@@ -63,10 +63,10 @@ def test_calibration_thresholds_are_in_grid():
 
 
 def test_calibration_with_fit_temperature_writes_to_config():
-    """When fit_temperature=True, the fitted scalar must land on config.temperature
-    BEFORE the threshold grid search runs."""
+    """When fit_temperature=True, per-head fitted temperatures must land on
+    config.temperatures BEFORE the threshold grid search runs."""
     model = _build()
-    assert model.config.temperature == 1.0
+    assert model.config.temperatures == {"e0": 1.0, "e1": 1.0, "final": 1.0}
     x = torch.randn(32, 3, 32, 32)
     y = torch.randint(0, 10, (32,))
     val_loader = DataLoader(TensorDataset(x, y), batch_size=8)
@@ -86,10 +86,16 @@ def test_calibration_with_fit_temperature_writes_to_config():
     # no calibration signal, so we assert the contract, not a specific value).
     import math
 
-    assert result.fitted_temperature is not None
-    assert math.isfinite(result.fitted_temperature)
-    assert result.fitted_temperature > 0.0
-    assert model.config.temperature == result.fitted_temperature
+    assert result.temperatures is not None
+    assert set(result.temperatures) == {"e0", "e1", "final"}
+    for temp in result.temperatures.values():
+        assert math.isfinite(temp) and temp > 0.0
+    assert model.config.temperatures == result.temperatures
+    # deprecated scalar alias still reports the final head's fit
+    assert result.fitted_temperature == result.temperatures["final"]
+    # per-head fit status is reported
+    assert result.temperature_fits is not None
+    assert set(result.temperature_fits) == {"e0", "e1", "final"}
     # thresholds still calibrated normally
     assert len(result.thresholds) == 2
 
@@ -119,21 +125,21 @@ def test_calibration_fit_temperature_warns_without_separate_loader():
 
 
 def test_calibration_fit_temperature_runs_before_threshold_search():
-    """The order matters: fit T, then sweep grids using logits/T. We verify by
-    asserting model.config.temperature is already non-1.0 by the time the search
-    begins — done indirectly by patching the grid evaluator."""
+    """The order matters: fit per-head temperatures, then sweep grids using
+    logits/T. We verify by spying on the grid evaluator and asserting every
+    evaluate call already saw the fitted temperatures."""
     model = _build()
     x = torch.randn(24, 3, 32, 32)
     y = torch.randint(0, 10, (24,))
     val_loader = DataLoader(TensorDataset(x, y), batch_size=8)
 
-    observed_temps: list[float] = []
+    observed_temps: list[dict[str, float]] = []
     from earlyon.core import thresholds as thresholds_mod
 
     original_eval = thresholds_mod._EvalCache.evaluate
 
     def spy_eval(self):
-        observed_temps.append(self._model.config.temperature)
+        observed_temps.append(dict(self._model.config.temperatures))
         return original_eval(self)
 
     thresholds_mod._EvalCache.evaluate = spy_eval
@@ -150,11 +156,12 @@ def test_calibration_fit_temperature_runs_before_threshold_search():
         thresholds_mod._EvalCache.evaluate = original_eval
 
     # every evaluate call (baseline + grid sweep + final) must have seen the
-    # already-fitted temperature, proving the fit ran before the search.
+    # already-fitted per-head temperatures, proving the fit ran before the search.
     assert observed_temps, "expected at least one evaluate call"
+    assert result.temperatures is not None
     assert all(
-        t == result.fitted_temperature for t in observed_temps
-    ), f"expected all temps == fitted {result.fitted_temperature}; got {observed_temps}"
+        t == result.temperatures for t in observed_temps
+    ), f"expected all temps == fitted {result.temperatures}; got {observed_temps}"
 
 
 def _build_entropy():
@@ -183,6 +190,11 @@ def test_entropy_calibration_updates_entropy_thresholds_not_confidence():
     import math
 
     model = _build_entropy()
+    # sharpen e0 so its entropy actually drops below the grid and it can fire;
+    # an untrained (near-uniform) head never fires and correctly stays disabled
+    with torch.no_grad():
+        model.exit_heads["e0"].classifier[-1].weight.mul_(30.0)
+        model.exit_heads["e0"].classifier[-1].bias.mul_(30.0)
     x = torch.randn(24, 3, 32, 32)
     y = torch.randint(0, 10, (24,))
     loader = DataLoader(TensorDataset(x, y), batch_size=4)
@@ -195,8 +207,9 @@ def test_entropy_calibration_updates_entropy_thresholds_not_confidence():
     assert model.config.entropy_thresholds == result.thresholds
     # confidence_thresholds must be untouched by an entropy calibration
     assert model.config.confidence_thresholds == [0.8, 0.8]
-    # they must have actually moved off the conservative 0.0 seed
-    assert any(t > 0.0 for t in result.thresholds)
+    # the sharpened exit must be enabled with a real grid threshold
+    assert result.enabled_exits[0] is True
+    assert result.thresholds[0] > 0.0
     h_max = math.log(10)
     assert all(0.0 <= t <= h_max + 1e-9 for t in result.thresholds)
 
@@ -357,12 +370,11 @@ def test_budget_calibration_trivial_budget_keeps_exits_disabled():
 
     assert result.budget_met is True
     assert result.thresholds == [1.0, 1.0]
-    # NOT asserting avg_computation_used == 1.0: the routing hook fires on
-    # `confidence >= threshold`, so a float32-saturated head (confidence 1.0)
-    # still fires at the clamped disabled value 1.0 — the library's documented
-    # convention, shared with calibrate_thresholds. The budget contract is
-    # only comp <= target.
-    assert result.avg_computation_used <= 1.0
+    assert result.enabled_exits == [False, False]
+    # explicit enablement: a disabled exit can no longer fire even with a
+    # float32-saturated softmax (confidence exactly 1.0), so the average
+    # compute is exactly the full backbone.
+    assert result.avg_computation_used == 1.0
 
 
 def test_budget_calibration_validates_target():
@@ -405,9 +417,9 @@ def test_budget_calibration_entropy_policy_writes_entropy_field():
 
 
 def test_calibration_without_fit_temperature_leaves_config_unchanged():
-    """The default path (fit_temperature=False) must not touch config.temperature."""
+    """The default path (fit_temperature=False) must not touch config.temperatures."""
     model = _build()
-    model.config.temperature = 1.5  # user-provided
+    model.config.temperatures = {"e0": 1.5, "e1": 1.5, "final": 1.5}  # user-provided
     x = torch.randn(16, 3, 32, 32)
     y = torch.randint(0, 10, (16,))
     val_loader = DataLoader(TensorDataset(x, y), batch_size=4)
@@ -419,7 +431,7 @@ def test_calibration_without_fit_temperature_leaves_config_unchanged():
         device="cpu",
     )
 
-    assert model.config.temperature == 1.5
+    assert model.config.temperatures == {"e0": 1.5, "e1": 1.5, "final": 1.5}
 
 
 def test_calibration_rejects_empty_grid():
@@ -462,19 +474,126 @@ def test_eval_cache_matches_real_router_exactly():
         cache = _EvalCache(model, loader, "cpu")
 
         settings = [
-            ([2.0, 2.0], [-1.0, -1.0], 1.0),  # non-firing search seeds
-            ([1.0, 1.0], [0.0, 0.0], 1.0),  # disabled values (saturated head fires)
-            ([0.8, 0.5], [0.5, 1.2], 1.0),  # mid-grid
-            ([0.5, 0.5], [2.0, 2.0], 2.5),  # aggressive + temperature
+            # (conf_thr, ent_thr, temps, enabled)
+            ([1.0, 1.0], [0.0, 0.0], (1.0, 1.0, 1.0), [False, False]),  # all disabled
+            ([1.0, 1.0], [0.0, 0.0], (1.0, 1.0, 1.0), [True, True]),  # knife-edge thresholds
+            ([0.8, 0.5], [0.5, 1.2], (1.0, 1.0, 1.0), [True, True]),  # mid-grid
+            ([0.5, 0.5], [2.0, 2.0], (2.5, 0.7, 1.3), [True, True]),  # per-head temps
+            ([0.5, 0.5], [2.0, 2.0], (2.5, 0.7, 1.3), [False, True]),  # first exit off
         ]
-        for conf_thr, ent_thr, temp in settings:
+        for conf_thr, ent_thr, temps, enabled in settings:
             model.config.confidence_thresholds = list(conf_thr)
             model.config.entropy_thresholds = list(ent_thr)
-            model.config.temperature = temp
+            model.config.temperatures = {"e0": temps[0], "e1": temps[1], "final": temps[2]}
+            model.config.enabled_exits = list(enabled)
             real = _evaluate_with_router(model, loader, "cpu")
             sim = cache.evaluate()
             # accuracy must match exactly (integer counts); avg compute may
             # differ by float summation order, so allow one ulp of slack
             assert sim[0] == real[0] and abs(sim[1] - real[1]) < 1e-12, (
-                f"policy={policy} conf={conf_thr} ent={ent_thr} T={temp}: " f"sim={sim} real={real}"
+                f"policy={policy} conf={conf_thr} ent={ent_thr} T={temps} "
+                f"enabled={enabled}: sim={sim} real={real}"
             )
+
+
+# ---------------- staged pipeline (v0.3) ----------------
+
+
+def test_calibration_rejects_empty_loader():
+    """An empty calibration loader must fail fast, not silently produce a
+    policy chosen from zero samples (or hang)."""
+    import pytest
+
+    model = _build()
+    empty = DataLoader(TensorDataset(torch.empty(0, 3, 32, 32), torch.empty(0, dtype=torch.long)))
+    with pytest.raises(ValueError, match="no batches"):
+        calibrate_thresholds(model, empty, device="cpu")
+
+
+def test_calibration_result_carries_rich_metadata():
+    model = _build()
+    x = torch.randn(16, 3, 32, 32)
+    y = torch.randint(0, 10, (16,))
+    loader = DataLoader(TensorDataset(x, y), batch_size=4)
+    result = calibrate_thresholds(model, loader, target_accuracy_drop=0.05, device="cpu")
+    assert result.num_samples == 16
+    assert result.objective == "accuracy_budget"
+    assert result.method == "greedy-coordinate-grid"
+    assert result.schema_version == 2
+    assert len(result.enabled_exits) == 2
+    assert abs(sum(result.exit_distribution.values()) - 1.0) < 1e-9
+    assert abs(result.accuracy_delta - (result.baseline_accuracy - result.final_accuracy)) < 1e-12
+    assert result.target_accuracy_drop == 0.05
+    # enablement written back to the model config
+    assert model.config.enabled_exits == result.enabled_exits
+
+
+def test_calibration_disables_exit_with_no_passing_threshold():
+    """A head that is pure noise (uniform logits never reach the grid) must end
+    up explicitly disabled, not parked on a sentinel threshold."""
+    model = _build()
+    _flatten_head(model, "e0")
+    _flatten_head(model, "e1")
+    x = torch.randn(16, 3, 32, 32)
+    model.eval()
+    with torch.no_grad():
+        y = model.backbone(x).argmax(dim=-1)  # full-network labels: baseline acc 1.0
+    loader = DataLoader(TensorDataset(x, y), batch_size=4)
+    result = calibrate_thresholds(model, loader, target_accuracy_drop=0.0, device="cpu")
+    assert result.enabled_exits == [False, False]
+    assert model.config.enabled_exits == [False, False]
+    assert result.exit_distribution == {"final": 1.0}
+
+
+def test_fit_head_temperatures_can_differ_per_head():
+    """Heads with different miscalibration must receive different fitted
+    temperatures — the P0 defect was one temperature fit from the final
+    classifier reused everywhere."""
+    from earlyon.core.thresholds import collect_head_logits, fit_head_temperatures
+
+    torch.manual_seed(3)
+    model = _build()
+    # make e0 wildly overconfident (large weight scale); leave e1/final alone
+    with torch.no_grad():
+        model.exit_heads["e0"].classifier[-1].weight.mul_(30.0)
+        model.exit_heads["e0"].classifier[-1].bias.mul_(30.0)
+    x = torch.randn(64, 3, 32, 32)
+    y = torch.randint(0, 10, (64,))
+    loader = DataLoader(TensorDataset(x, y), batch_size=16)
+
+    cache = collect_head_logits(model, loader, "cpu")
+    fits = fit_head_temperatures(cache)
+    assert set(fits) == {"e0", "e1", "final"}
+    t_e0 = fits["e0"].temperature
+    t_final = fits["final"].temperature
+    # the overconfident head needs a much larger temperature than the final head
+    assert t_e0 > t_final * 2, (t_e0, t_final)
+
+
+def test_collect_head_logits_shapes_and_order():
+    from earlyon.core.thresholds import collect_head_logits
+
+    model = _build()
+    x = torch.randn(12, 3, 32, 32)
+    y = torch.randint(0, 10, (12,))
+    loader = DataLoader(TensorDataset(x, y), batch_size=4)
+    cache = collect_head_logits(model, loader, "cpu")
+    assert cache.head_names == ["e0", "e1", "final"]
+    assert [t.shape for t in cache.logits] == [torch.Size([12, 10])] * 3
+    assert cache.num_samples == 12
+    assert cache.flops[-1].item() == 1.0
+    # cumulative fractions are monotone non-decreasing
+    flops = cache.flops.tolist()
+    assert all(a <= b for a, b in zip(flops, flops[1:]))
+
+
+def test_collect_head_logits_restores_training_mode():
+    from earlyon.core.thresholds import collect_head_logits
+
+    model = _build()
+    model.train()
+    x = torch.randn(4, 3, 32, 32)
+    y = torch.randint(0, 10, (4,))
+    loader = DataLoader(TensorDataset(x, y), batch_size=4)
+    collect_head_logits(model, loader, "cpu")
+    assert model.training is True

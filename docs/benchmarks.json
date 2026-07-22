@@ -1,94 +1,99 @@
 {
-  "resnet18": {
-    "backbone": "resnet18",
-    "dataset": "cifar10",
-    "device": "NVIDIA GeForce RTX 4050 Laptop GPU",
-    "stage1_seconds": 449.7,
-    "stage2_seconds": 147.2,
-    "calibrate_seconds": 183.9,
-    "thresholds": [
-      0.7,
-      0.85
-    ],
-    "baseline_accuracy_val": 0.9632,
-    "test_accuracy": 0.9442,
-    "test_avg_computation_used": 0.8988,
-    "test_exit_distribution": {
-      "final": 0.6471,
-      "exit_1": 0.2584,
-      "exit_0": 0.0945
+  "_schema": 2,
+  "_note": "Records under 'legacy_v0_2' were measured with the pre-v0.3 benchmark runner, which fed the wrapper and the raw backbone DIFFERENT inputs and used non-identical measurement boundaries; they are not methodologically comparable to 'runs' records produced by the v0.3 fair runner (benchmark_models: identical preloaded samples, identical warmup/sync/boundary for every compared model). Regenerate with scripts/run_benchmarks.py or scripts/re_evaluate.py.",
+  "legacy_v0_2": {
+    "resnet18": {
+      "backbone": "resnet18",
+      "dataset": "cifar10",
+      "device": "NVIDIA GeForce RTX 4050 Laptop GPU",
+      "stage1_seconds": 449.7,
+      "stage2_seconds": 147.2,
+      "calibrate_seconds": 183.9,
+      "thresholds": [
+        0.7,
+        0.85
+      ],
+      "baseline_accuracy_val": 0.9632,
+      "test_accuracy": 0.9442,
+      "test_avg_computation_used": 0.8988,
+      "test_exit_distribution": {
+        "final": 0.6471,
+        "exit_1": 0.2584,
+        "exit_0": 0.0945
+      },
+      "throughput_backbone_ips": 758.4,
+      "throughput_wrapper_ips": 1906.6,
+      "speedup": 2.575,
+      "latency_backbone_p50_ms": 1.316,
+      "latency_wrapper_p50_ms": 0.51,
+      "latency_wrapper_p95_ms": 0.547,
+      "throughput_wrapper_ips_noise_input": 1853.0,
+      "throughput_speedup_noise_input": 2.443,
+      "latency_wrapper_p50_ms_noise_input": 0.508,
+      "note": "throughput uses random noise input which may trigger spurious exits in trained heads; test_avg_computation_used is the honest signal"
     },
-    "throughput_backbone_ips": 758.4,
-    "throughput_wrapper_ips": 1906.6,
-    "speedup": 2.575,
-    "latency_backbone_p50_ms": 1.316,
-    "latency_wrapper_p50_ms": 0.51,
-    "latency_wrapper_p95_ms": 0.547,
-    "throughput_wrapper_ips_noise_input": 1853.0,
-    "throughput_speedup_noise_input": 2.443,
-    "latency_wrapper_p50_ms_noise_input": 0.508,
-    "note": "throughput uses random noise input which may trigger spurious exits in trained heads; test_avg_computation_used is the honest signal"
+    "resnet50": {
+      "backbone": "resnet50",
+      "dataset": "cifar10",
+      "device": "NVIDIA GeForce RTX 4050 Laptop GPU",
+      "stage1_seconds": 1009.3,
+      "stage2_seconds": 345.7,
+      "calibrate_seconds": 413.8,
+      "thresholds": [
+        0.7,
+        0.85,
+        0.99
+      ],
+      "baseline_accuracy_val": 0.976,
+      "test_accuracy": 0.9588,
+      "test_avg_computation_used": 0.8142,
+      "test_exit_distribution": {
+        "final": 0.4177,
+        "exit_2": 0.4247,
+        "exit_0": 0.0579,
+        "exit_1": 0.0997
+      },
+      "throughput_backbone_ips": 355.1,
+      "throughput_wrapper_ips": 329.4,
+      "speedup": 0.938,
+      "latency_backbone_p50_ms": 2.814,
+      "latency_wrapper_p50_ms": 3.025,
+      "latency_wrapper_p95_ms": 3.082,
+      "throughput_wrapper_ips_noise_input": 1942.9,
+      "throughput_speedup_noise_input": 5.472,
+      "latency_wrapper_p50_ms_noise_input": 0.509,
+      "note": "throughput uses random noise input which may trigger spurious exits in trained heads; test_avg_computation_used is the honest signal"
+    },
+    "mobilenetv2": {
+      "backbone": "mobilenetv2",
+      "dataset": "cifar10",
+      "device": "NVIDIA GeForce RTX 4050 Laptop GPU",
+      "stage1_seconds": 577.9,
+      "stage2_seconds": 165.8,
+      "calibrate_seconds": 225.5,
+      "thresholds": [
+        0.75,
+        0.99
+      ],
+      "baseline_accuracy_val": 0.9508,
+      "test_accuracy": 0.9331,
+      "test_avg_computation_used": 0.939,
+      "test_exit_distribution": {
+        "final": 0.9155,
+        "exit_0": 0.0801,
+        "exit_1": 0.0044
+      },
+      "throughput_backbone_ips": 751.4,
+      "throughput_wrapper_ips": 2866.5,
+      "speedup": 3.809,
+      "latency_backbone_p50_ms": 1.323,
+      "latency_wrapper_p50_ms": 0.337,
+      "latency_wrapper_p95_ms": 0.414,
+      "throughput_wrapper_ips_noise_input": 2685.9,
+      "throughput_speedup_noise_input": 3.574,
+      "latency_wrapper_p50_ms_noise_input": 0.365,
+      "note": "throughput uses random noise input which may trigger spurious exits in trained heads; test_avg_computation_used is the honest signal"
+    }
   },
-  "resnet50": {
-    "backbone": "resnet50",
-    "dataset": "cifar10",
-    "device": "NVIDIA GeForce RTX 4050 Laptop GPU",
-    "stage1_seconds": 1009.3,
-    "stage2_seconds": 345.7,
-    "calibrate_seconds": 413.8,
-    "thresholds": [
-      0.7,
-      0.85,
-      0.99
-    ],
-    "baseline_accuracy_val": 0.976,
-    "test_accuracy": 0.9588,
-    "test_avg_computation_used": 0.8142,
-    "test_exit_distribution": {
-      "final": 0.4177,
-      "exit_2": 0.4247,
-      "exit_0": 0.0579,
-      "exit_1": 0.0997
-    },
-    "throughput_backbone_ips": 355.1,
-    "throughput_wrapper_ips": 329.4,
-    "speedup": 0.938,
-    "latency_backbone_p50_ms": 2.814,
-    "latency_wrapper_p50_ms": 3.025,
-    "latency_wrapper_p95_ms": 3.082,
-    "throughput_wrapper_ips_noise_input": 1942.9,
-    "throughput_speedup_noise_input": 5.472,
-    "latency_wrapper_p50_ms_noise_input": 0.509,
-    "note": "throughput uses random noise input which may trigger spurious exits in trained heads; test_avg_computation_used is the honest signal"
-  },
-  "mobilenetv2": {
-    "backbone": "mobilenetv2",
-    "dataset": "cifar10",
-    "device": "NVIDIA GeForce RTX 4050 Laptop GPU",
-    "stage1_seconds": 577.9,
-    "stage2_seconds": 165.8,
-    "calibrate_seconds": 225.5,
-    "thresholds": [
-      0.75,
-      0.99
-    ],
-    "baseline_accuracy_val": 0.9508,
-    "test_accuracy": 0.9331,
-    "test_avg_computation_used": 0.939,
-    "test_exit_distribution": {
-      "final": 0.9155,
-      "exit_0": 0.0801,
-      "exit_1": 0.0044
-    },
-    "throughput_backbone_ips": 751.4,
-    "throughput_wrapper_ips": 2866.5,
-    "speedup": 3.809,
-    "latency_backbone_p50_ms": 1.323,
-    "latency_wrapper_p50_ms": 0.337,
-    "latency_wrapper_p95_ms": 0.414,
-    "throughput_wrapper_ips_noise_input": 2685.9,
-    "throughput_speedup_noise_input": 3.574,
-    "latency_wrapper_p50_ms_noise_input": 0.365,
-    "note": "throughput uses random noise input which may trigger spurious exits in trained heads; test_avg_computation_used is the honest signal"
-  }
+  "runs": {}
 }

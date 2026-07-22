@@ -132,3 +132,126 @@ def test_benchmark_wrapper_on_loader_cycles_loader_when_short():
 
     r = benchmark_wrapper_on_loader(model, loader, device="cpu", num_warmup=2, num_runs=20)
     assert r.num_runs == 20
+
+
+# ---------------- fair comparison runner (v0.3) ----------------
+
+
+class _SpyModule(torch.nn.Module):
+    """Records every input it sees so tests can prove identical sample feeds."""
+
+    def __init__(self):
+        super().__init__()
+        self.seen = []
+        self.linear = torch.nn.Linear(3 * 32 * 32, 10)
+
+    def forward(self, x):
+        self.seen.append(x.detach().clone())
+        return self.linear(x.flatten(1))
+
+
+def test_benchmark_models_feeds_identical_samples_to_every_model():
+    from earlyon.benchmarking import benchmark_models
+
+    a, b = _SpyModule(), _SpyModule()
+    benchmark_models({"a": a, "b": b}, input_shape=(1, 3, 32, 32), num_warmup=2, num_runs=5)
+    assert len(a.seen) == len(b.seen) == 7
+    for xa, xb in zip(a.seen, b.seen):
+        assert torch.equal(xa, xb), "models must see the exact same sample sequence"
+
+
+def test_benchmark_models_reports_accuracy_from_labelled_loader():
+    from earlyon.benchmarking import benchmark_models
+
+    torch.manual_seed(0)
+    model = _build(thresholds=(0.0, 0.0))  # always exits at e0
+    images = torch.randn(16, 3, 32, 32)
+    labels = torch.randint(0, 10, (16,))
+    loader = DataLoader(TensorDataset(images, labels), batch_size=1)
+    cmp = benchmark_models(
+        {"wrapper": model, "backbone": model.backbone},
+        loader=loader,
+        num_warmup=2,
+        num_runs=8,
+    )
+    for r in cmp.results.values():
+        assert r.accuracy is not None and 0.0 <= r.accuracy <= 1.0
+        assert r.num_labelled_samples == 8
+        assert r.input_source == "loader"
+    assert cmp.results["wrapper"].exit_distribution == {"exit_0": 1.0}
+    assert cmp.results["backbone"].exit_distribution == {"final": 1.0}
+    assert cmp.speedup_vs("wrapper", "backbone") > 0
+
+
+def test_benchmark_result_carries_measurement_metadata():
+    from earlyon.benchmarking import benchmark_models
+
+    model = _build()
+    cmp = benchmark_models({"m": model}, input_shape=(1, 3, 32, 32), num_warmup=1, num_runs=3)
+    r = cmp.results["m"]
+    assert r.boundary == "model-only"
+    assert r.sync == "none"  # cpu
+    assert r.batch_size == 1
+    assert r.input_shape == (1, 3, 32, 32)
+    assert r.dtype == "torch.float32"
+    assert r.num_warmup == 1
+    assert r.input_source == "random-noise"
+    assert r.accuracy is None
+    d = r.to_dict()
+    assert d["boundary"] == "model-only"
+    # deprecated alias still reads
+    assert r.avg_computation_used == r.avg_estimated_flops_fraction
+
+
+def test_benchmark_models_end_to_end_boundary_is_labelled():
+    from earlyon.benchmarking import benchmark_models
+
+    model = _build()
+    cmp = benchmark_models(
+        {"m": model},
+        input_shape=(1, 3, 32, 32),
+        num_warmup=1,
+        num_runs=3,
+        boundary="end-to-end",
+    )
+    assert cmp.results["m"].boundary == "end-to-end"
+
+
+def test_benchmark_models_validates_inputs():
+    import pytest
+
+    from earlyon.benchmarking import benchmark_models
+
+    model = _build()
+    with pytest.raises(ValueError, match="num_warmup"):
+        benchmark_models({"m": model}, input_shape=(1, 3, 32, 32), num_warmup=-1)
+    with pytest.raises(ValueError, match="num_runs"):
+        benchmark_models({"m": model}, input_shape=(1, 3, 32, 32), num_runs=0)
+    with pytest.raises(ValueError, match="models"):
+        benchmark_models({}, input_shape=(1, 3, 32, 32))
+    with pytest.raises(ValueError, match="loader or an input_shape"):
+        benchmark_models({"m": model})
+    with pytest.raises(ValueError, match="boundary"):
+        benchmark_models(
+            {"m": model},
+            input_shape=(1, 3, 32, 32),
+            num_warmup=0,
+            num_runs=1,
+            boundary="sideways",
+        )
+    empty = DataLoader(
+        TensorDataset(torch.empty(0, 3, 32, 32), torch.empty(0, dtype=torch.long)),
+        batch_size=1,
+    )
+    with pytest.raises(ValueError, match="non-empty"):
+        benchmark_models({"m": model}, loader=empty, num_warmup=0, num_runs=1)
+
+
+def test_benchmark_models_noise_is_deterministic_per_seed():
+    from earlyon.benchmarking import benchmark_models
+
+    a, b = _SpyModule(), _SpyModule()
+    benchmark_models({"a": a}, input_shape=(1, 3, 32, 32), num_warmup=0, num_runs=3, seed=7)
+    benchmark_models({"b": b}, input_shape=(1, 3, 32, 32), num_warmup=0, num_runs=3, seed=7)
+    for xa, xb in zip(a.seen, b.seen):
+        assert torch.equal(xa, xb)

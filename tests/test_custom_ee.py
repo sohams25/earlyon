@@ -146,3 +146,156 @@ def test_custom_ee_bad_layer_name_raises_value_error_listing_layers():
     backbone = TinyBackbone(num_classes=10)
     with pytest.raises(ValueError, match="stage1"):
         custom_ee(backbone, ["stage_one_typo"], num_classes=10, input_shape=(1, 3, 32, 32))
+
+
+# ---------------- v0.3 interface: examples, devices, adapters, validation ----------------
+
+
+class _KwargBackbone(torch.nn.Module):
+    """Backbone whose forward takes an extra kwarg with a runtime default."""
+
+    def __init__(self, num_classes=10):
+        super().__init__()
+        self.stem = torch.nn.Conv2d(3, 8, 3, padding=1)
+        self.head = torch.nn.Linear(8, num_classes)
+
+    def forward(self, x, scale: float = 1.0):
+        f = self.stem(x) * scale
+        return self.head(f.mean(dim=(2, 3)))
+
+
+class _TupleOutputBackbone(torch.nn.Module):
+    """The exit layer emits a (features, aux) tuple — needs an extractor."""
+
+    def __init__(self, num_classes=10):
+        super().__init__()
+        self.block = _TupleBlock()
+        self.head = torch.nn.Linear(8, num_classes)
+
+    def forward(self, x):
+        f, _aux = self.block(x)
+        return self.head(f.mean(dim=(2, 3)))
+
+
+class _TupleBlock(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 8, 3, padding=1)
+
+    def forward(self, x):
+        f = self.conv(x)
+        return f, {"aux": f.sum()}
+
+
+class _ReusedLayerBackbone(torch.nn.Module):
+    def __init__(self, num_classes=10):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 3, 3, padding=1)
+        self.head = torch.nn.Linear(3, num_classes)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.conv(x)  # same module twice
+        return self.head(x.mean(dim=(2, 3)))
+
+
+def test_custom_ee_accepts_example_args_and_kwargs():
+    backbone = _KwargBackbone()
+    model = custom_ee(
+        backbone,
+        exit_layers=["stem"],
+        num_classes=10,
+        input_shape=(1, 3, 16, 16),
+        example_args=(torch.zeros(1, 3, 16, 16),),
+        example_kwargs={"scale": 2.0},
+    )
+    model.eval()
+    result = model(torch.randn(1, 3, 16, 16), mode="inference")
+    assert result.prediction.shape == (1, 10)
+
+
+def test_custom_ee_example_kwargs_without_args_rejected():
+    with pytest.raises(ValueError, match="example_kwargs"):
+        custom_ee(
+            _KwargBackbone(),
+            exit_layers=["stem"],
+            num_classes=10,
+            example_kwargs={"scale": 2.0},
+        )
+
+
+def test_custom_ee_tuple_output_needs_and_uses_feature_extractor():
+    backbone = _TupleOutputBackbone()
+    # without an extractor: clear error naming the fix
+    with pytest.raises(ValueError, match="feature_extractors"):
+        custom_ee(backbone, exit_layers=["block"], num_classes=10, input_shape=(1, 3, 16, 16))
+    # with one: wraps and routes
+    model = custom_ee(
+        _TupleOutputBackbone(),
+        exit_layers=["block"],
+        num_classes=10,
+        input_shape=(1, 3, 16, 16),
+        feature_extractors={"block": lambda out: out[0]},
+    )
+    model.eval()
+    model.config.confidence_thresholds = [0.0]  # force the exit to fire
+    result = model(torch.randn(1, 3, 16, 16), mode="inference")
+    assert result.exit_taken == 0  # the adapter ran inside the routing hook
+    assert result.prediction.shape == (1, 10)
+
+
+def test_custom_ee_rejects_extractor_for_unknown_layer():
+    with pytest.raises(ValueError, match="unknown exit layer"):
+        custom_ee(
+            _TupleOutputBackbone(),
+            exit_layers=["block"],
+            num_classes=10,
+            input_shape=(1, 3, 16, 16),
+            feature_extractors={"block": lambda o: o[0], "nope": lambda o: o},
+        )
+
+
+def test_custom_ee_rejects_reused_exit_layer():
+    with pytest.raises(RuntimeError, match="more than once"):
+        custom_ee(
+            _ReusedLayerBackbone(),
+            exit_layers=["conv"],
+            num_classes=10,
+            input_shape=(1, 3, 16, 16),
+        )
+
+
+def test_custom_ee_rejects_out_of_order_exit_layers():
+    backbone = TinyBackbone(num_classes=10)
+    with pytest.raises(RuntimeError, match="forward-execution order"):
+        custom_ee(
+            backbone,
+            exit_layers=["stage2", "stage1"],  # reversed
+            num_classes=10,
+            input_shape=(1, 3, 32, 32),
+        )
+
+
+def test_custom_ee_restores_training_mode_after_dry_run():
+    backbone = TinyBackbone(num_classes=10)
+    backbone.train()
+    custom_ee(backbone, exit_layers=["stage1"], num_classes=10, input_shape=(1, 3, 32, 32))
+    assert backbone.training is True
+
+
+def test_custom_ee_infers_device_from_backbone():
+    """A meta-level check that stays CPU-only: the dry-run tensor must follow
+    the backbone's parameter device rather than defaulting to CPU."""
+    from earlyon.models.custom import _infer_backbone_device
+
+    backbone = TinyBackbone(num_classes=10)
+    assert _infer_backbone_device(backbone).type == "cpu"
+
+
+@pytest.mark.gpu
+def test_custom_ee_wraps_cuda_backbone_without_device_error():
+    backbone = TinyBackbone(num_classes=10).cuda()
+    model = custom_ee(backbone, exit_layers=["stage1"], num_classes=10, input_shape=(1, 3, 32, 32))
+    model.eval()
+    result = model(torch.randn(1, 3, 32, 32, device="cuda"), mode="inference")
+    assert result.prediction.shape == (1, 10)

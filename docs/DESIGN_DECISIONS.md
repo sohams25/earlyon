@@ -78,19 +78,61 @@ returns `budget_met=False` with the least-compute configuration found, and
 because it is measured on the calibration set, the guarantee is average-case
 over that distribution. The README's limitations section says both out loud.
 
-## Temperature scaling before calibration
+## Temperature scaling before calibration — one temperature per head
 
-**Decision:** optionally fit a single scalar temperature (Guo et al. 2017) on
-held-out data before threshold calibration, per exit head.
+**Decision:** optionally fit a temperature (Guo et al. 2017) on held-out data
+before threshold calibration — one **per head**: every exit head and the
+final classifier get their own fitted scalar
+(`EarlyExitConfig.temperatures`).
 
-**Why:** modern CNN heads are systematically over-confident; softmax maxima
-cluster near 1.0 whether the prediction is right or wrong. Thresholding an
-uncalibrated confidence wastes most of the [0, 1] range and makes the greedy
-sweep's grid resolution meaningless. One scalar per head fixes the ranking
-cheaply without changing argmax predictions, so accuracy is untouched by
-construction. We chose temperature scaling over Platt/isotonic because it's
-the simplest method with a strong published track record on exactly this
-failure mode.
+**Why per-head:** each exit head is a different classifier reading different
+features, with its own miscalibration; a shallow head is typically far more
+over-confident than the final classifier. Earlier versions fitted a single
+temperature from the final classifier's logits and reused it for every exit
+— defensible for none of them. The fit (`fit_head_temperatures`) runs on
+cached logits from one pass, and each `TemperatureFitResult` carries a
+convergence/fallback status: a diverged LBFGS falls back to 1.0 (no
+calibration) with a warning, never to an artificially sharp value.
+
+**Why temperature scaling at all:** modern CNN heads are systematically
+over-confident; softmax maxima cluster near 1.0 whether the prediction is
+right or wrong. Thresholding an uncalibrated confidence wastes most of the
+[0, 1] range and makes the greedy sweep's grid resolution meaningless. One
+scalar per head fixes the ranking cheaply without changing argmax
+predictions, so accuracy is untouched by construction. We chose temperature
+scaling over Platt/isotonic because it's the simplest method with a strong
+published track record on exactly this failure mode.
+
+## Explicit exit enablement instead of threshold sentinels
+
+**Decision:** whether an exit may fire is a boolean
+(`EarlyExitConfig.enabled_exits`), not a magic threshold value.
+
+**Why:** the old convention — confidence threshold `1.0` (or entropy `0.0`)
+means "disabled" — was numerically unsound: the router fires on
+`confidence >= threshold`, and a float32-saturated softmax produces
+confidence exactly 1.0, so a "disabled" exit could still fire. Explicit
+booleans make disablement absolute (the head isn't even evaluated at
+inference, saving its overhead too), keep thresholds meaning only
+thresholds, and let calibration state its decision (`enabled_exits` on the
+result) instead of encoding it. v1 checkpoints migrate their sentinels to
+explicit flags on load, with a warning. Disabled heads still produce logits
+in training mode — enablement is a routing concept, not a training one.
+
+## `estimated_backbone_flops_fraction`, not "computation used"
+
+**Decision:** the compute number every result reports is named as what it is
+— a static *estimate* of the backbone FLOPs fraction — with the estimator's
+provenance attached (`wrapper.flops_estimate`: method, reliability, notes).
+
+**Why:** the old name `computation_used` read like a measurement of the
+inference that just ran. It never was: it is a one-time fvcore analysis of
+the backbone, excludes the exit heads and all routing overhead, and assumes
+each leaf module runs once in registration order. Backbones that reuse
+modules break that assumption — the estimator now detects reuse and degrades
+to a warned, low-confidence uniform fallback instead of a precise-looking
+wrong number. The analysis is lazy (first inference) so constructing large
+models (ViT) stays fast. `computation_used` survives as a read alias.
 
 ## Entropy routing alongside confidence
 

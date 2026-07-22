@@ -11,8 +11,7 @@ import torch
 from earlyon import __version__
 from earlyon.benchmarking import (
     JetsonProfiler,
-    benchmark_backbone,
-    benchmark_wrapper,
+    benchmark_models,
     evaluate,
 )
 from earlyon.core.thresholds import calibrate_thresholds, calibrate_thresholds_for_budget
@@ -253,17 +252,26 @@ def calibrate(
 def benchmark(
     model_path: str, device: str, runs: int, warmup: int, input_size: int, json_out: str | None
 ) -> None:
-    """Throughput + latency benchmark, single-sample (batch=1)."""
+    """Throughput + latency benchmark, single-sample (batch=1).
+
+    The wrapper and its raw backbone are measured on the exact same
+    fixed-seed noise samples with identical boundaries. Noise input is a
+    best-case bound (trained heads may fire spuriously); use the Python API
+    with a real loader for the honest input-distribution signal.
+    """
     dev = _device(device)
     model = load_wrapper(model_path)
     shape = (1, 3, input_size, input_size)
-    wrap_r = benchmark_wrapper(
-        model, input_shape=shape, device=dev, num_warmup=warmup, num_runs=runs
+    cmp_r = benchmark_models(
+        {"early_exit": model, "backbone": model.backbone},
+        input_shape=shape,
+        device=dev,
+        num_warmup=warmup,
+        num_runs=runs,
     )
-    bb_r = benchmark_backbone(
-        model.backbone, input_shape=shape, device=dev, num_warmup=warmup, num_runs=runs
-    )
-    speedup = wrap_r.throughput_ips / max(bb_r.throughput_ips, 1e-9)
+    wrap_r = cmp_r.results["early_exit"]
+    bb_r = cmp_r.results["backbone"]
+    speedup = cmp_r.speedup_vs("early_exit", "backbone")
     click.echo(
         json.dumps(
             {
@@ -295,11 +303,16 @@ def benchmark(
 @click.option("--input-size", default=224, type=int)
 @click.option("--device", default="auto")
 def profile(model_path: str, runs: int, warmup: int, input_size: int, device: str) -> None:
-    """Jetson profile — reads tegrastats when available."""
+    """Jetson profile — reads tegrastats when available.
+
+    Reports instantaneous-power medians and, separately, integrated energy
+    over the timed window. Missing telemetry (non-Jetson host) is reported as
+    null, never as zero.
+    """
     dev = _device(device)
     model = load_wrapper(model_path)
     profiler = JetsonProfiler()
-    runs_out = profiler.profile(
+    runs_out, energy = profiler.profile_with_energy(
         model,
         input_shape=(1, 3, input_size, input_size),
         num_warmup=warmup,
@@ -309,15 +322,22 @@ def profile(model_path: str, runs: int, warmup: int, input_size: int, device: st
     import statistics
 
     lat = [r.latency_ms for r in runs_out]
-    power = [r.power_mw for r in runs_out]
-    temp = [r.temp_c for r in runs_out]
+    power = [r.power_mw for r in runs_out if r.power_mw is not None]
+    temp = [r.temp_c for r in runs_out if r.temp_c is not None]
     click.echo(
         json.dumps(
             {
                 "runs": len(runs_out),
                 "latency_median_ms": statistics.median(lat),
-                "power_median_mw": statistics.median(power),
-                "temp_median_c": statistics.median(temp),
+                "instantaneous_power_median_mw": statistics.median(power) if power else None,
+                "temp_median_c": statistics.median(temp) if temp else None,
+                "energy": {
+                    "window_seconds": energy.window_seconds,
+                    "num_power_samples": energy.num_power_samples,
+                    "avg_power_mw": energy.avg_power_mw,
+                    "energy_mj": energy.energy_mj,
+                    "energy_per_inference_mj": energy.energy_per_inference_mj,
+                },
                 "tegrastats_available": profiler.monitor.available,
             },
             indent=2,

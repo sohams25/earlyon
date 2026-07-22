@@ -91,18 +91,126 @@ def test_batched_inference_prediction_is_grad_free_without_external_no_grad():
 
 @pytest.mark.parametrize("bad_temp", [float("nan"), float("inf"), float("-inf")])
 def test_nonfinite_temperature_does_not_poison_softmax(bad_temp):
-    """A NaN/Inf config.temperature (e.g. from a degenerate fit) must not turn
-    every softmax into NaN: _safe_temperature falls back to 1.0 so routing stays
-    well-defined and confidence is finite. Inf is the consequential case — the
-    old `max(inf, 1e-6)` left T=inf, making every softmax uniform."""
+    """Config validation rejects non-finite temperatures at the trust
+    boundaries, but a direct post-hoc mutation of config.temperatures bypasses
+    it; the runtime guard must still fall back to 1.0 so routing stays
+    well-defined and confidence is finite."""
     import math
 
     wrapper, _ = _build(thresholds=(1.0, 1.0, 1.0))
     wrapper.eval()
-    wrapper.config.temperature = bad_temp
+    for head in wrapper.config.temperatures:
+        wrapper.config.temperatures[head] = bad_temp  # bypasses validate()
     result = wrapper(torch.randn(1, 3, 32, 32), mode="inference")
     assert math.isfinite(result.confidence)
     assert torch.isfinite(result.prediction).all()
+
+
+def test_disabled_exit_cannot_fire_even_at_saturated_confidence():
+    """The P0 enablement invariant: an exit with enabled_exits[i]=False must
+    never fire, even when its softmax confidence is exactly 1.0 (float32
+    saturation) and its threshold is 1.0 — the numerical edge case the old
+    'threshold sentinel means disabled' convention got wrong."""
+    wrapper, _ = _build(thresholds=(1.0, 1.0, 1.0))
+    # saturate exit e0: huge constant logit -> softmax max exactly 1.0
+    with torch.no_grad():
+        wrapper.exit_heads["e0"].classifier[-1].bias.zero_()
+        wrapper.exit_heads["e0"].classifier[-1].bias[0] = 1e3
+    wrapper.eval()
+    x = torch.randn(1, 3, 32, 32)
+
+    # sanity: with the exit enabled and threshold 1.0, saturation DOES fire
+    wrapper.config.enabled_exits = [True, False, False]
+    assert wrapper(x, mode="inference").exit_taken == 0
+
+    # disabled: must fall through to the final classifier
+    wrapper.config.enabled_exits = [False, False, False]
+    result = wrapper(x, mode="inference")
+    assert result.exit_taken == -1
+    assert result.estimated_backbone_flops_fraction == 1.0
+
+    # batched path honors the same invariant
+    batched = wrapper.forward_inference_batched(torch.randn(4, 3, 32, 32))
+    assert batched.exit_taken == -1
+
+
+def test_disabled_exit_cannot_fire_at_entropy_exactly_zero():
+    """Same invariant for the entropy policy: a saturated head has entropy
+    exactly 0.0, which meets any threshold >= 0; disabling the exit must win."""
+    backbone = TinyBackbone(num_classes=10)
+    exits = [
+        ExitPoint("e0", "stage1", STAGE_CHANNELS["stage1"]),
+        ExitPoint("e1", "stage2", STAGE_CHANNELS["stage2"]),
+    ]
+    heads = {ep.name: EarlyExitHead(ep.in_channels, 10) for ep in exits}
+    cfg = EarlyExitConfig(
+        backbone="tiny",
+        num_classes=10,
+        exit_points=exits,
+        routing_policy="entropy",
+        entropy_thresholds=[0.0, 0.0],
+    )
+    wrapper = EarlyExitWrapper(backbone, heads, lambda t: t, cfg, input_shape=(1, 3, 32, 32))
+    with torch.no_grad():
+        wrapper.exit_heads["e0"].classifier[-1].bias.zero_()
+        wrapper.exit_heads["e0"].classifier[-1].bias[0] = 1e3
+    wrapper.eval()
+    x = torch.randn(1, 3, 32, 32)
+
+    wrapper.config.enabled_exits = [True, False]
+    assert wrapper(x, mode="inference").exit_taken == 0  # entropy 0.0 <= 0.0 fires
+
+    wrapper.config.enabled_exits = [False, False]
+    assert wrapper(x, mode="inference").exit_taken == -1
+
+
+def test_disabled_exit_still_produces_training_logits():
+    """Enablement is a routing concept: training mode must return logits for
+    every head, disabled or not, so a disabled head keeps learning."""
+    wrapper, _ = _build()
+    wrapper.config.enabled_exits = [False, True, False]
+    outputs = wrapper(torch.randn(2, 3, 32, 32), mode="training")
+    assert len(outputs) == 4  # all 3 exits + final, regardless of enablement
+
+
+def test_per_head_temperature_is_applied_at_the_right_exit():
+    """Each exit must use its own temperature. A very high temperature flattens
+    exit e0's softmax below the threshold (no fire); resetting only e0's
+    temperature to 1.0 makes the same input fire at e0 again."""
+    wrapper, _ = _build(thresholds=(0.9, 0.9, 0.9))
+    with torch.no_grad():
+        wrapper.exit_heads["e0"].classifier[-1].bias.zero_()
+        wrapper.exit_heads["e0"].classifier[-1].bias[0] = 20.0  # confident but not saturated
+        # make later heads and final produce flat logits so nothing else fires
+        wrapper.exit_heads["e1"].classifier[-1].weight.zero_()
+        wrapper.exit_heads["e1"].classifier[-1].bias.zero_()
+        wrapper.exit_heads["e2"].classifier[-1].weight.zero_()
+        wrapper.exit_heads["e2"].classifier[-1].bias.zero_()
+    wrapper.eval()
+    x = torch.randn(1, 3, 32, 32)
+
+    wrapper.config.temperatures = {"e0": 1.0, "e1": 1.0, "e2": 1.0, "final": 1.0}
+    assert wrapper(x, mode="inference").exit_taken == 0
+
+    # flatten ONLY e0 via its per-head temperature; other heads unchanged
+    wrapper.config.temperatures = {"e0": 100.0, "e1": 1.0, "e2": 1.0, "final": 1.0}
+    result = wrapper(x, mode="inference")
+    assert result.exit_taken == -1, "e0's own temperature must govern e0's routing"
+
+
+def test_wrapper_rejects_mismatched_exit_heads():
+    """Heads must exactly match the configured exit points."""
+    backbone = TinyBackbone(num_classes=10)
+    exits = [ExitPoint("e0", "stage1", STAGE_CHANNELS["stage1"])]
+    cfg = EarlyExitConfig(backbone="tiny", num_classes=10, exit_points=exits)
+    with pytest.raises(ValueError, match="exit_heads"):
+        EarlyExitWrapper(backbone, {}, lambda t: t, cfg, input_shape=(1, 3, 32, 32))
+    heads = {
+        "e0": EarlyExitHead(STAGE_CHANNELS["stage1"], 10),
+        "extra": EarlyExitHead(STAGE_CHANNELS["stage2"], 10),
+    }
+    with pytest.raises(ValueError, match="exit_heads"):
+        EarlyExitWrapper(backbone, heads, lambda t: t, cfg, input_shape=(1, 3, 32, 32))
 
 
 def test_safe_temperature_clamps_to_positive_finite():
@@ -112,8 +220,10 @@ def test_safe_temperature_clamps_to_positive_finite():
     assert _safe_temperature(float("nan")) == 1.0
     assert _safe_temperature(float("inf")) == 1.0
     assert _safe_temperature(float("-inf")) == 1.0
-    assert _safe_temperature(0.0) == 1e-6  # non-positive clamps up
-    assert _safe_temperature(-5.0) == 1e-6
+    # non-positive values fall back to the no-op temperature 1.0 — NOT a tiny
+    # positive clamp, which would produce an artificially razor-sharp softmax
+    assert _safe_temperature(0.0) == 1.0
+    assert _safe_temperature(-5.0) == 1.0
     assert _safe_temperature(2.5) == 2.5  # finite positive passes through
 
 

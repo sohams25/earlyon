@@ -122,7 +122,8 @@ def test_wrap_creates_checkpoint(tmp_path):
 
 
 def test_save_load_round_trip(tmp_path):
-    """save_wrapper + load_wrapper must preserve thresholds, weights, temperature."""
+    """save_wrapper + load_wrapper must preserve thresholds, weights,
+    per-head temperatures, and enabled_exits."""
     import torch
 
     from earlyon.utils import build_model, load_wrapper, save_wrapper
@@ -130,7 +131,8 @@ def test_save_load_round_trip(tmp_path):
     model = build_model("resnet18", num_classes=10, pretrained=False)
     model.config.confidence_thresholds = [0.42, 0.73]
     model.config.loss_weights = [0.1, 0.2, 0.7]
-    model.config.temperature = 1.5
+    model.config.temperatures = {"e0": 1.5, "e1": 0.9, "final": 1.2}
+    model.config.enabled_exits = [True, False]
     # mutate an exit head weight so we can verify state_dict round-trip
     with torch.no_grad():
         first_param = next(iter(model.exit_heads["e0"].parameters()))
@@ -142,7 +144,8 @@ def test_save_load_round_trip(tmp_path):
 
     assert loaded.config.confidence_thresholds == [0.42, 0.73]
     assert loaded.config.loss_weights == [0.1, 0.2, 0.7]
-    assert loaded.config.temperature == 1.5
+    assert loaded.config.temperatures == {"e0": 1.5, "e1": 0.9, "final": 1.2}
+    assert loaded.config.enabled_exits == [True, False]
     loaded_first = next(iter(loaded.exit_heads["e0"].parameters()))
     assert torch.allclose(loaded_first, torch.full_like(loaded_first, 0.123))
 

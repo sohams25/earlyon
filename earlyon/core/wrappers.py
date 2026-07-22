@@ -10,30 +10,33 @@ from __future__ import annotations
 
 import math
 import threading
+import warnings
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Optional
 
 import torch
 import torch.nn as nn
 
-from earlyon.core.flops import per_layer_flops
-from earlyon.core.types import EarlyExitConfig, InferenceResult
+from earlyon.core.flops import FlopsEstimate, estimate_layer_flops
+from earlyon.core.types import FINAL_HEAD, EarlyExitConfig, InferenceResult
 
 if TYPE_CHECKING:
     from earlyon.core.types import BatchedInferenceResult
 
 
 def _safe_temperature(temperature: float) -> float:
-    """Clamp the softmax temperature to a strictly positive, finite value.
+    """Defense-in-depth guard for the softmax temperature at routing time.
 
-    A NaN/Inf temperature (e.g. from a diverged ``fit_temperature`` on degenerate
-    logits) would otherwise poison every softmax: ``max(nan, 1e-6)`` returns
-    ``nan`` because Python ``max`` keeps its first argument on a False compare,
-    and ``softmax(logits / nan)`` is silently all-NaN. Falling back to 1.0
-    (the no-op temperature) keeps routing well-defined.
+    ``EarlyExitConfig.validate()`` rejects non-finite or non-positive
+    temperatures at every trust boundary (construction, wrapping, checkpoint
+    load), so a bad value can only appear here through direct post-hoc
+    mutation of ``config.temperatures``. In that case fall back to 1.0 (the
+    no-op temperature): a NaN would silently poison every softmax, and the
+    old ``max(t, 1e-6)`` clamp turned an invalid negative temperature into an
+    artificially razor-sharp softmax — worse than no calibration at all.
     """
-    if not math.isfinite(temperature):
+    if not math.isfinite(temperature) or temperature <= 0.0:
         return 1.0
-    return max(temperature, 1e-6)
+    return temperature
 
 
 def _is_compiling() -> bool:
@@ -92,19 +95,44 @@ class EarlyExitWrapper(nn.Module):
         final_classifier: Callable[[torch.Tensor], torch.Tensor],
         config: EarlyExitConfig,
         input_shape: tuple[int, int, int, int] = (1, 3, 224, 224),
+        feature_adapters: Optional[Mapping[str, Callable[[Any], torch.Tensor]]] = None,
     ) -> None:
         super().__init__()
         self.backbone = backbone
         self.exit_heads = nn.ModuleDict(exit_heads)
         self._final_classifier = final_classifier
+        # re-validate at this trust boundary: the config is mutable and may
+        # have been edited between construction and wrapping.
+        config.validate()
+        missing_heads = [ep.name for ep in config.exit_points if ep.name not in exit_heads]
+        extra_heads = [n for n in exit_heads if all(ep.name != n for ep in config.exit_points)]
+        if missing_heads or extra_heads:
+            raise ValueError(
+                "exit_heads must have exactly one head per configured exit point; "
+                f"missing: {missing_heads}, unexpected: {extra_heads}"
+            )
         self.config = config
+        # optional per-exit callables mapping a layer's raw output (tuple /
+        # dict / token tensor / ...) to the Tensor its head consumes. Keyed by
+        # exit name; NOT part of the state_dict — factories must rebuild them.
+        unknown_adapters = [
+            n for n in (feature_adapters or {}) if all(ep.name != n for ep in config.exit_points)
+        ]
+        if unknown_adapters:
+            raise ValueError(f"feature_adapters keyed by unknown exit name(s): {unknown_adapters}")
+        self._feature_adapters: dict[str, Callable[[Any], torch.Tensor]] = dict(
+            feature_adapters or {}
+        )
 
         # ordered list of (exit_idx, exit_name, layer_name)
         self._exits = [(i, ep.name, ep.layer_name) for i, ep in enumerate(config.exit_points)]
 
-        # cumulative FLOPs fraction at each exit layer
-        layer_names = [ep.layer_name for ep in config.exit_points]
-        self._flops_at: dict[str, float] = per_layer_flops(backbone, layer_names, input_shape)
+        # cumulative estimated FLOPs fraction at each exit layer — computed
+        # LAZILY on first use (the analysis runs forward passes of the
+        # backbone; doing it here made construction of large models like ViT
+        # unacceptably slow). See `flops_estimate` / `_flops_at`.
+        self._input_shape = input_shape
+        self._flops_estimate: Optional["FlopsEstimate"] = None
 
         # per-thread caches: a single wrapper instance can be called from
         # multiple threads (DataParallel, inference servers). state lives in
@@ -123,6 +151,50 @@ class EarlyExitWrapper(nn.Module):
         self._register_hooks()
 
     # ---------------- public api ----------------
+
+    @property
+    def flops_estimate(self) -> FlopsEstimate:
+        """The lazy per-exit FLOPs estimate, with estimator metadata.
+
+        Computed on first access (one/two backbone forward passes) and cached.
+        Must be materialised *outside* an active routing pass: the analysis
+        runs the backbone directly, and the hooks stay no-ops only while this
+        thread's inference/training flags are unset — which is why the forward
+        paths call it before flipping those flags.
+        """
+        if self._flops_estimate is None:
+            layer_names = [ep.layer_name for ep in self.config.exit_points]
+            # the probe input follows the backbone wherever it currently lives
+            device = next(self.backbone.parameters(), torch.empty(0)).device
+            try:
+                self._flops_estimate = estimate_layer_flops(
+                    self.backbone,
+                    layer_names,
+                    self._input_shape,
+                    device=str(device),
+                )
+            except Exception as exc:  # backbone can't run from zeros(input_shape)
+                from earlyon.core.flops import METHOD_UNIFORM
+
+                warnings.warn(
+                    f"FLOPs analysis failed ({type(exc).__name__}: {exc}); using a "
+                    "low-confidence uniform estimate (FlopsEstimate.reliable=False)",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                n = len(layer_names)
+                self._flops_estimate = FlopsEstimate(
+                    fractions={nm: (i + 1) / (n + 1) for i, nm in enumerate(layer_names)},
+                    method=METHOD_UNIFORM,
+                    reliable=False,
+                    notes=(f"analysis failed: {type(exc).__name__}",),
+                )
+        return self._flops_estimate
+
+    @property
+    def _flops_at(self) -> dict[str, float]:
+        """Cumulative estimated FLOPs fraction per exit layer (lazy)."""
+        return self.flops_estimate.fractions
 
     def forward(
         self, x: torch.Tensor, mode: str = "inference"
@@ -172,6 +244,7 @@ class EarlyExitWrapper(nn.Module):
         if x.size(0) < 1:
             raise ValueError("empty batch")
 
+        _ = self.flops_estimate  # materialise BEFORE the routing flags flip
         self._init_tls()
         self._tls.inference_mode = True
         self._tls.batched_mode = True
@@ -195,18 +268,18 @@ class EarlyExitWrapper(nn.Module):
                         predictions=sig.prediction,
                         exit_taken=sig.exit_idx,
                         per_sample_confidence=sig.per_sample_confidence,
-                        computation_used=self._flops_at[layer_name],
+                        estimated_backbone_flops_fraction=self._flops_at[layer_name],
                     )
                 # no exit fired
                 final_logits = self._final_classifier(feats)
-                temp = _safe_temperature(self.config.temperature)
+                temp = _safe_temperature(self.config.temperatures[FINAL_HEAD])
                 probs = torch.softmax(final_logits / temp, dim=-1)
                 per_sample_conf = probs.max(dim=-1).values
                 return BatchedInferenceResult(
                     predictions=final_logits,
                     exit_taken=-1,
                     per_sample_confidence=per_sample_conf,
-                    computation_used=1.0,
+                    estimated_backbone_flops_fraction=1.0,
                 )
         finally:
             self._tls.inference_mode = False
@@ -243,13 +316,22 @@ class EarlyExitWrapper(nn.Module):
                     "without exit heads for compiled inference."
                 )
 
+            # a disabled exit never routes — not even at softmax confidence
+            # exactly 1.0 or entropy exactly 0.0. In training mode the head
+            # still produces logits (enablement is a routing concept; disabled
+            # heads keep training so they can be re-enabled later).
+            if not in_training and not self.config.enabled_exits[exit_idx]:
+                return output
+
+            adapter = self._feature_adapters.get(exit_name)
+            features = adapter(output) if adapter is not None else output
             head = self.exit_heads[exit_name]
-            logits = head(output)
+            logits = head(features)
             if in_training:
                 getattr(self._tls, "training_outputs", []).append(logits)
                 return output
 
-            temp = _safe_temperature(self.config.temperature)
+            temp = _safe_temperature(self.config.temperatures[exit_name])
             probs = torch.softmax(logits / temp, dim=-1)
             policy = self.config.routing_policy
 
@@ -309,6 +391,7 @@ class EarlyExitWrapper(nn.Module):
             self._tls.in_training = False
 
     def _forward_inference(self, x: torch.Tensor) -> InferenceResult:
+        _ = self.flops_estimate  # materialise BEFORE the routing flags flip
         self._init_tls()
         self._tls.inference_mode = True
         try:
@@ -323,19 +406,19 @@ class EarlyExitWrapper(nn.Module):
                         prediction=sig.prediction,
                         exit_taken=sig.exit_idx,
                         confidence=sig.confidence,
-                        computation_used=self._flops_at[layer_name],
+                        estimated_backbone_flops_fraction=self._flops_at[layer_name],
                     )
                 # no exit triggered — use final classifier (inside outer try so
                 # any exception still resets inference_mode)
                 final_logits = self._final_classifier(feats)
-                temp = _safe_temperature(self.config.temperature)
+                temp = _safe_temperature(self.config.temperatures[FINAL_HEAD])
                 probs = torch.softmax(final_logits / temp, dim=-1)
                 confidence = probs.max().item()
                 return InferenceResult(
                     prediction=final_logits,
                     exit_taken=-1,
                     confidence=confidence,
-                    computation_used=1.0,
+                    estimated_backbone_flops_fraction=1.0,
                 )
         finally:
             self._tls.inference_mode = False

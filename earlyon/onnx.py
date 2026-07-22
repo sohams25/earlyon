@@ -120,3 +120,10 @@ def export_to_onnx(
     finally:
         model.train(was_training)
     return output_names
+
+
+# Explicitly named alias: this export computes ALL exits every time (routing
+# is applied by the caller to the outputs); it does not short-circuit compute.
+# For an export that skips later layers, see earlyon.staged /
+# docs/STAGED_DEPLOYMENT.md.
+export_all_exits_to_onnx = export_to_onnx

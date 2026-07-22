@@ -1,0 +1,263 @@
+{
+  "purpose": "bounded system-validation run; not a tuned headline benchmark",
+  "seed": 42,
+  "determinism_note": "seed fixes init/data order; bitwise GPU determinism not enforced (cuDNN)",
+  "dataset": {
+    "name": "CIFAR-10 (torchvision, images upsampled to 224)",
+    "train": 45000,
+    "temperature": 2500,
+    "calibration": 2500,
+    "test": 10000
+  },
+  "weights": "ImageNet-pretrained torchvision weights, fine-tuned as recorded below",
+  "epochs": {
+    "stage1_backbone": 2,
+    "stage2_exits": 2,
+    "static_baseline": 2
+  },
+  "model": {
+    "backbone": "resnet18",
+    "exit_points": [
+      {
+        "name": "e0",
+        "layer": "layer2",
+        "in_channels": 128
+      },
+      {
+        "name": "e1",
+        "layer": "layer3",
+        "in_channels": 256
+      }
+    ],
+    "head_config": "EarlyExitHead(hidden_dim=128, dropout=0.2)"
+  },
+  "calibration": {
+    "objective": "accuracy_budget",
+    "target_accuracy_drop": 0.01,
+    "method": "greedy-coordinate-grid",
+    "thresholds": [
+      0.7,
+      0.9
+    ],
+    "enabled_exits": [
+      true,
+      true
+    ],
+    "temperatures": {
+      "e0": 0.7298606743211031,
+      "e1": 0.6408520879825857,
+      "final": 0.8881403542803983
+    },
+    "temperature_fit_converged": {
+      "e0": true,
+      "e1": true,
+      "final": true
+    },
+    "calibration_split_baseline_acc": 0.9444,
+    "calibration_split_routed_acc": 0.936
+  },
+  "test": {
+    "early_exit_routed_accuracy": 0.9292,
+    "backbone_accuracy": 0.9407,
+    "static_mobilenetv2_accuracy": 0.9267,
+    "early_exit_estimated_flops_fraction": 0.8799,
+    "exit_distribution": {
+      "final": 0.6953,
+      "exit_1": 0.2491,
+      "exit_0": 0.0556
+    }
+  },
+  "benchmark_real_input": {
+    "backbone_resnet18": {
+      "throughput_ips": 711.8584093111814,
+      "latency_median_ms": 1.328067499343888,
+      "latency_p50_ms": 1.3283369989949279,
+      "latency_p95_ms": 1.5121870001166826,
+      "latency_p99_ms": 1.6473269988637185,
+      "avg_estimated_flops_fraction": 1.0,
+      "exit_distribution": {
+        "final": 1.0
+      },
+      "num_runs": 300,
+      "device": "cuda",
+      "num_warmup": 50,
+      "batch_size": 1,
+      "input_shape": [
+        1,
+        3,
+        224,
+        224
+      ],
+      "dtype": "torch.float32",
+      "boundary": "model-only",
+      "sync": "cuda-synchronize-per-iteration",
+      "input_source": "loader",
+      "accuracy": 0.9366666666666666,
+      "num_labelled_samples": 300
+    },
+    "early_exit_resnet18": {
+      "throughput_ips": 781.8321391791311,
+      "latency_median_ms": 1.4273374999902444,
+      "latency_p50_ms": 1.4274259992816951,
+      "latency_p95_ms": 1.4558230013790308,
+      "latency_p99_ms": 1.4794830003665993,
+      "avg_estimated_flops_fraction": 0.8855555555555557,
+      "exit_distribution": {
+        "final": 0.73,
+        "exit_1": 0.19666666666666666,
+        "exit_0": 0.07333333333333333
+      },
+      "num_runs": 300,
+      "device": "cuda",
+      "num_warmup": 50,
+      "batch_size": 1,
+      "input_shape": [
+        1,
+        3,
+        224,
+        224
+      ],
+      "dtype": "torch.float32",
+      "boundary": "model-only",
+      "sync": "cuda-synchronize-per-iteration",
+      "input_source": "loader",
+      "accuracy": 0.9166666666666666,
+      "num_labelled_samples": 300
+    },
+    "static_mobilenetv2": {
+      "throughput_ips": 702.0757905132444,
+      "latency_median_ms": 1.398074999997334,
+      "latency_p50_ms": 1.3982290001877118,
+      "latency_p95_ms": 1.4844550005364,
+      "latency_p99_ms": 1.5049649991851766,
+      "avg_estimated_flops_fraction": 1.0,
+      "exit_distribution": {
+        "final": 1.0
+      },
+      "num_runs": 300,
+      "device": "cuda",
+      "num_warmup": 50,
+      "batch_size": 1,
+      "input_shape": [
+        1,
+        3,
+        224,
+        224
+      ],
+      "dtype": "torch.float32",
+      "boundary": "model-only",
+      "sync": "cuda-synchronize-per-iteration",
+      "input_source": "loader",
+      "accuracy": 0.93,
+      "num_labelled_samples": 300
+    }
+  },
+  "benchmark_real_speedups": {
+    "early_exit_vs_backbone": 1.098,
+    "static_vs_backbone": 0.986
+  },
+  "benchmark_noise_input": {
+    "note": "best-case bound: trained heads may fire spuriously on noise",
+    "backbone_resnet18": {
+      "throughput_ips": 755.3621345047061,
+      "latency_median_ms": 1.3031150001552305,
+      "latency_p50_ms": 1.3031210000917781,
+      "latency_p95_ms": 1.3612429993372643,
+      "latency_p99_ms": 1.9350050006323727,
+      "avg_estimated_flops_fraction": 1.0,
+      "exit_distribution": {
+        "final": 1.0
+      },
+      "num_runs": 300,
+      "device": "cuda",
+      "num_warmup": 50,
+      "batch_size": 1,
+      "input_shape": [
+        1,
+        3,
+        224,
+        224
+      ],
+      "dtype": "torch.float32",
+      "boundary": "model-only",
+      "sync": "cuda-synchronize-per-iteration",
+      "input_source": "random-noise",
+      "accuracy": null,
+      "num_labelled_samples": 0
+    },
+    "early_exit_resnet18": {
+      "throughput_ips": 1551.8133886081237,
+      "latency_median_ms": 0.6742770001437748,
+      "latency_p50_ms": 0.6742940004187403,
+      "latency_p95_ms": 0.7781620006426238,
+      "latency_p99_ms": 0.7984900003066286,
+      "avg_estimated_flops_fraction": 0.3333333333333333,
+      "exit_distribution": {
+        "exit_0": 1.0
+      },
+      "num_runs": 300,
+      "device": "cuda",
+      "num_warmup": 50,
+      "batch_size": 1,
+      "input_shape": [
+        1,
+        3,
+        224,
+        224
+      ],
+      "dtype": "torch.float32",
+      "boundary": "model-only",
+      "sync": "cuda-synchronize-per-iteration",
+      "input_source": "random-noise",
+      "accuracy": null,
+      "num_labelled_samples": 0
+    },
+    "static_mobilenetv2": {
+      "throughput_ips": 681.161147706457,
+      "latency_median_ms": 1.4052340002308483,
+      "latency_p50_ms": 1.4053710001462605,
+      "latency_p95_ms": 1.5782589998707408,
+      "latency_p99_ms": 3.479250999589567,
+      "avg_estimated_flops_fraction": 1.0,
+      "exit_distribution": {
+        "final": 1.0
+      },
+      "num_runs": 300,
+      "device": "cuda",
+      "num_warmup": 50,
+      "batch_size": 1,
+      "input_shape": [
+        1,
+        3,
+        224,
+        224
+      ],
+      "dtype": "torch.float32",
+      "boundary": "model-only",
+      "sync": "cuda-synchronize-per-iteration",
+      "input_source": "random-noise",
+      "accuracy": null,
+      "num_labelled_samples": 0
+    },
+    "early_exit_vs_backbone_speedup": 2.054
+  },
+  "peak_cuda_memory_mb_during_real_benchmark": 350.4,
+  "stage_seconds": {
+    "stage1_seconds": 220.7,
+    "stage2_seconds": 71.9,
+    "baseline_seconds": 284.4,
+    "baseline_batch_size": 32,
+    "calibrate_seconds": 4.6,
+    "test_eval_seconds": 16.8
+  },
+  "total_wall_seconds": 622.7,
+  "environment": {
+    "python": "3.13.9",
+    "torch": "2.10.0+cu128",
+    "torchvision": "0.25.0+cu128",
+    "cuda": "12.8",
+    "gpu": "NVIDIA GeForce RTX 4050 Laptop GPU",
+    "earlyon": "0.2.0",
+    "os": "Linux-6.8.0-106-generic-x86_64-with-glibc2.35"
+  }
+}
