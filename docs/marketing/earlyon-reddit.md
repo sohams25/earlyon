@@ -1,3 +1,7 @@
+> NOTE (v0.3.0): this is archived v0.2-era launch copy. The numbers below
+> predate the v0.3 fair benchmark runner and are superseded by
+> docs/evidence/CUDA_EVIDENCE.md; do not reuse them.
+
 # r/MachineLearning launch draft
 
 Flair: [P] (Project). Post as text, not a link post; r/ML buries bare links.
@@ -34,7 +38,7 @@ model = resnet50_ee(num_classes=10, pretrained=True).eval()
 result = model(x, mode="inference")
 
 result.exit_taken        # which head fired (-1 = full network)
-result.computation_used  # fraction of FLOPs actually run
+result.estimated_backbone_flops_fraction  # estimated fraction of backbone FLOPs (not measured latency)
 result.confidence        # how sure it was when it left
 ```
 

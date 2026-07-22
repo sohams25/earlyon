@@ -1,5 +1,18 @@
 # Bounded CUDA evidence run — 2026-07-22
 
+> **Erratum (2026-07-22, [#6](https://github.com/sohams25/earlyon/issues/6)).**
+> The "estimated backbone FLOPs fraction" figures in this run come from the
+> *low-confidence uniform fallback*, not the fvcore attribution: the reuse
+> detector false-positives on torchvision ResNet's shared in-block (zero-FLOP)
+> ReLU modules, so `resnet18_ee` was assigned uniform per-exit fractions
+> (0.333/0.667) with `FlopsEstimate.reliable=False` and a RuntimeWarning.
+> Under fvcore leaf-walk attribution the per-exit fractions are 0.547/0.774
+> and the run's average estimated fraction is **0.918, not the 0.880 recorded
+> below** — i.e. the run saved roughly **8%** of estimated backbone compute,
+> not 12%. Accuracy, latency, throughput and exit-distribution numbers are
+> measurements and are unaffected. Raw JSON is preserved as recorded, with an
+> `erratum` field appended.
+
 Machine-readable source: [`cuda_evidence.json`](cuda_evidence.json).
 Reproduce: `python scripts/evidence_run.py` (seed 42; ~10 min compute on the
 hardware below after the CIFAR-10 download).
