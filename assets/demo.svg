@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" role="img" aria-label="earlyon Python session. An easy input (car_closeup) exits at head 0 using 12% of compute; a hard input (blurry_bird) takes no head and runs the full network." font-family="ui-monospace, Menlo, Consolas, monospace">
-  <title>earlyon — inference session</title>
-  <desc>Looping Python REPL. Beat 1: an easy input exits at head 0, using 12% of the network. Beat 2: a hard input takes no head and runs to the final classifier. A spine diagram beside it lights the short path, then the full path.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" role="img" aria-label="earlyon Python session, illustrative values. An easy input (car_closeup) exits at head 0; a hard input (blurry_bird) takes no head and runs the full network." font-family="ui-monospace, Menlo, Consolas, monospace">
+  <title>earlyon — inference session (illustrative)</title>
+  <desc>Looping Python REPL with illustrative values. Beat 1: an easy input exits at head 0 and later layers never run. Beat 2: a hard input takes no head and runs to the final classifier. A spine diagram beside it lights the short path, then the full path.</desc>
 
   <!-- accent = exited early / compute saved; neutral = ran everything -->
   <defs>
@@ -13,9 +13,9 @@
 
     <!-- typewriter masks: each rect grows from 0 to the measured text extent -->
     <clipPath id="type-b1-cmd1"><rect x="118" y="110" width="590" height="32"><animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.05;0.1417;0.5;0.52;1" values="0;0;590;590;0;0"/></rect></clipPath>
-    <clipPath id="type-b1-cmd2"><rect x="118" y="154" width="680" height="32"><animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.175;0.2667;0.5;0.52;1" values="0;0;680;680;0;0"/></rect></clipPath>
+    <clipPath id="type-b1-cmd2"><rect x="118" y="154" width="760" height="32"><animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.175;0.2667;0.5;0.52;1" values="0;0;760;760;0;0"/></rect></clipPath>
     <clipPath id="type-b2-cmd1"><rect x="118" y="110" width="590" height="32"><animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.55;0.6417;0.9917;0.9958;1" values="0;0;590;590;0;0"/></rect></clipPath>
-    <clipPath id="type-b2-cmd2"><rect x="118" y="154" width="680" height="32"><animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.675;0.7667;0.9917;0.9958;1" values="0;0;680;680;0;0"/></rect></clipPath>
+    <clipPath id="type-b2-cmd2"><rect x="118" y="154" width="760" height="32"><animate attributeName="width" dur="12s" repeatCount="indefinite" keyTimes="0;0.675;0.7667;0.9917;0.9958;1" values="0;0;760;760;0;0"/></rect></clipPath>
   </defs>
 
   <!-- page-matching frame + slightly lighter terminal card with a 1px border -->
@@ -40,17 +40,17 @@
   <g opacity="1">
     <animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.0167;0.0417;0.4667;0.5;1" values="0;0;1;1;0;0"/>
     <text x="118" y="132" font-size="24" fill="#E6EDF3" clip-path="url(#type-b1-cmd1)">r = model(car_closeup, mode="inference")</text>
-    <text x="118" y="176" font-size="24" fill="#E6EDF3" clip-path="url(#type-b1-cmd2)">r.exit_taken, r.computation_used, r.confidence</text>
-    <text x="56" y="220" font-size="24" fill="#E6EDF3" opacity="0">(0, 0.12, 0.97)<animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.2833;0.30;0.5;0.52;1" values="0;0;1;1;0;0"/></text>
-    <text x="56" y="264" font-size="20" fill="#56B98A" opacity="0"># confident at the first head. 88% of the network never ran.<animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.333;0.35;0.5;0.52;1" values="0;0;1;1;0;0"/></text>
+    <text x="118" y="176" font-size="24" fill="#E6EDF3" clip-path="url(#type-b1-cmd2)">r.exit_taken, r.estimated_backbone_flops_fraction</text>
+    <text x="56" y="220" font-size="24" fill="#E6EDF3" opacity="0">(0, 0.12)  # illustrative estimate<animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.2833;0.30;0.5;0.52;1" values="0;0;1;1;0;0"/></text>
+    <text x="56" y="264" font-size="20" fill="#56B98A" opacity="0"># confident at the first head; the later layers never ran.<animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.333;0.35;0.5;0.52;1" values="0;0;1;1;0;0"/></text>
   </g>
 
   <!-- ===== BEAT 2 — hard input, no head fires, full network ===== -->
   <g opacity="0">
     <animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.5;0.5333;0.9583;0.9917;1" values="0;0;1;1;0;0"/>
     <text x="118" y="132" font-size="24" fill="#E6EDF3" clip-path="url(#type-b2-cmd1)">r = model(blurry_bird, mode="inference")</text>
-    <text x="118" y="176" font-size="24" fill="#E6EDF3" clip-path="url(#type-b2-cmd2)">r.exit_taken, r.computation_used, r.confidence</text>
-    <text x="56" y="220" font-size="24" fill="#E6EDF3" opacity="0">(-1, 1.00, 0.91)<animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.7917;0.8083;0.9917;0.9958;1" values="0;0;1;1;0;0"/></text>
+    <text x="118" y="176" font-size="24" fill="#E6EDF3" clip-path="url(#type-b2-cmd2)">r.exit_taken, r.estimated_backbone_flops_fraction</text>
+    <text x="56" y="220" font-size="24" fill="#E6EDF3" opacity="0">(-1, 1.00)<animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.7917;0.8083;0.9917;0.9958;1" values="0;0;1;1;0;0"/></text>
     <text x="56" y="264" font-size="20" fill="#8B949E" opacity="0"># no head was sure enough. hard inputs go the distance.<animate attributeName="opacity" dur="12s" repeatCount="indefinite" keyTimes="0;0.8417;0.8583;0.9917;0.9958;1" values="0;0;1;1;0;0"/></text>
   </g>
 
@@ -107,10 +107,7 @@
   </g>
   <g font-size="19" fill="#8B949E">
     <text x="232" y="465">exit 0</text>
-    <text x="346" y="465" text-anchor="end">12%</text>
     <text x="492" y="465">exit 1</text>
-    <text x="606" y="465" text-anchor="end">40%</text>
     <text x="752" y="465">exit 2</text>
-    <text x="866" y="465" text-anchor="end">74%</text>
   </g>
 </svg>

@@ -11,12 +11,20 @@
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
 </p>
 
-> **`earlyon`** — early exits for PyTorch CV models. Small classifier heads
-> partway through the network let easy images stop computing once an exit is
-> confident; only hard images run every layer. Attaches to your existing
-> backbone via forward hooks. No rewrite, weights load unchanged.
+`earlyon` adds intermediate classifier heads to PyTorch vision models so
+suitable inputs can stop before the full backbone runs. It includes
+exit-head training, independent calibration for every head, threshold
+selection, checkpoint migration, fair benchmarking and a reference staged
+runtime.
 
----
+Two things to know up front. Dynamic routing currently runs in eager
+PyTorch. The standard ONNX export computes all exits and is not, by itself,
+a conditional early-exit runtime. For supported architectures, the
+reference staged runtime can genuinely skip later stages; it is
+intentionally narrow and is not a universal model-partitioning system.
+
+The primary target is batch-1, latency-sensitive inference; batched routing
+exists but is conservative.
 
 ```python
 import torch
@@ -26,25 +34,29 @@ from earlyon.models import resnet50_ee
 model = resnet50_ee(num_classes=10, pretrained=True).eval()
 result = model(torch.randn(1, 3, 224, 224), mode="inference")
 
-result.exit_taken                           # which head answered; -1 = full network
-result.estimated_backbone_flops_fraction    # static estimate, not a measurement
-result.confidence                           # softmax confidence where it answered
+result.exit_taken                        # which head answered; -1 = full network
+result.estimated_backbone_flops_fraction # estimated fraction of backbone FLOPs
+                                         # executed — not measured latency or energy
+result.confidence                        # softmax confidence where it answered
 ```
 
-earlyon is a research-to-deployment toolkit. Its primary target is batch-1,
-latency-sensitive inference; batched routing exists but is conservative.
-
 <p align="center">
-  <img src="assets/demo.svg" alt="earlyon demo: an easy image exits at the first head using 12% of the FLOPs, a hard image runs the whole network" width="100%">
+  <img src="assets/demo.svg" alt="earlyon demo with illustrative values: an easy image exits at the first head so later layers never run; a hard image runs the whole network" width="100%">
 </p>
 
 ## Install
 
+PyPI publication is pending trusted-publisher configuration. The v0.3.0
+GitHub tag is the current installable release:
+
 ```bash
-pip install earlyon
+pip install git+https://github.com/sohams25/earlyon@v0.3.0
 ```
 
-Or from source for development:
+(Once PyPI publication completes, `pip install earlyon==0.3.0` will work;
+until then it does not.)
+
+From source for development:
 
 ```bash
 git clone https://github.com/sohams25/earlyon.git
@@ -62,15 +74,18 @@ a car and a blurry, half-occluded bird both pay for all fifty layers, even
 though the car is decided after a handful of them. At batch size 1 on an
 edge device, that flat cost is your latency and your power budget.
 
-The fix has been in the literature for years: BranchyNet in 2016, then eight
-years of follow-ups collected in a 2024 ACM survey (10.1145/3698767) showing
-1.3 to 2.5× compute savings at single-sample edge inference. What was
-missing is the tool. Each paper ships custom code for one architecture;
-earlyon is the `pip install` version.
+The idea has been in the literature for years: BranchyNet in 2016, then
+eight years of follow-ups collected in a 2024 ACM survey (10.1145/3698767)
+reporting 1.3 to 2.5× *estimated compute* savings at single-sample edge
+inference. Each paper ships custom code for one architecture; earlyon is an
+installable toolkit for the same idea — and its own benchmark below shows
+that estimated savings do not automatically become wall-clock savings.
 
 ## What it does
 
-Six ready-made factories, or wrap anything:
+Built-in factories are provided for the documented architectures. A custom
+wrapper is also available when the model's intermediate features, input
+signature and classifier outputs can be identified.
 
 | Factory | Backbone | Exits |
 |---|---|---|
@@ -81,10 +96,13 @@ Six ready-made factories, or wrap anything:
 | `cifar_resnet_ee` | CIFAR-native ResNet (He et al. 2015) | 3 (3×3 stem, no maxpool, native 32×32) |
 | `vit_b_16_ee` | torchvision ViT-B/16 | 2 (after encoder blocks 3 and 9) |
 
-`custom_ee` attaches exits at named layers of any `nn.Module` and infers each
-head's width from one dry-run forward. Conv (4D) and transformer token (3D)
-features both work; the backbone must already return `(B, num_classes)`
-logits.
+`custom_ee` attaches exits at named layers of a user-provided `nn.Module`,
+inferring each head's width from one validated dry-run forward. The tested
+contract: conv (4D) and transformer token (3D) features; positional and
+keyword example inputs; tuple/dict layer outputs via `feature_extractors`;
+the backbone must return `(B, num_classes)` logits. Reused, missing or
+out-of-order exit layers fail explicitly — custom support is not automatic
+for every PyTorch model.
 
 ```python
 from earlyon.models import custom_ee
@@ -97,91 +115,87 @@ Routing has two policies. `"confidence"` (default) exits when
 entropy drops below a threshold, which reads the whole distribution instead
 of just the top class. Whether an exit may fire at all is an explicit
 per-exit boolean (`enabled_exits`) — a disabled exit can never fire, not
-even at softmax confidence exactly 1.0. Calibration and
-`save_wrapper`/`load_wrapper` are policy-aware, so a calibrated entropy
-model reloads as one; checkpoints carry a versioned schema (v2) and older
-files migrate with a warning.
+even at softmax confidence exactly 1.0, and never through a numerical
+sentinel threshold. Calibration and `save_wrapper`/`load_wrapper` are
+policy-aware, so a calibrated entropy model reloads as one.
 
 Training is two-stage by default: train the backbone exactly as you already
 do, freeze it (parameters and BatchNorm stats), then train the small heads
 for a few epochs. `joint_train_backbone_and_exits` does end-to-end training
 instead when you want the last bit of accuracy and have the budget.
-Temperature scaling (Guo et al. 2017) can be fit before calibration to fix
-the usual softmax over-confidence; pass `fit_temperature=True` and each head
-— every exit and the final classifier — gets its own fitted temperature.
+
+## Per-head calibration
+
+Each exit and the final classifier are calibrated independently. `earlyon`
+does not apply one global temperature to every head because their
+confidence distributions can differ substantially — a shallow head is
+usually far more over-confident than the final classifier. Pass
+`fit_temperature=True` and every head gets its own fitted temperature (Guo
+et al. 2017); threshold search runs after the fit, on a separate
+calibration split, and the test split is never touched by either step.
+
+```text
+train exit heads
+      ↓
+collect calibration logits
+      ↓
+fit one temperature per head
+      ↓
+search exit thresholds
+      ↓
+evaluate on a separate test split
+      ↓
+benchmark routed inference
+```
+
 The full split discipline (what may touch which data) is written down in
 [`docs/CALIBRATION_AND_BENCHMARK_CONTRACT.md`](docs/CALIBRATION_AND_BENCHMARK_CONTRACT.md).
 
-## Measured results (legacy: earlyon v0.2 methodology)
+## Measured results (one seeded, bounded run)
 
-CIFAR-10, trained on an RTX 4050 Laptop GPU (6 GB) from ImageNet-pretrained
-weights: 3–4 epochs for the backbone, 3–4 for the exit heads, thresholds
-calibrated to a 1% accuracy budget. **These runs predate v0.3**: they used a
-single shared temperature and the pre-fair-runner benchmark; treat them as
-indicative, not as v0.3 results. Regenerate with
-`python scripts/run_benchmarks.py` (records land in
-`docs/benchmarks.json` under `runs`; these live under `legacy_v0_2`).
-
-| Model       | Test Acc | Baseline Acc | Est. FLOPs fraction | % exited early |
-|-------------|---------:|-------------:|--------------------:|---------------:|
-| ResNet18    |   94.42% |       96.32% |              89.88% |          35.3% |
-| ResNet50    |   95.88% |       97.60% |              81.42% |          58.2% |
-| MobileNetV2 |   93.31% |       95.08% |              93.90% |           8.5% |
-
-The FLOPs fraction is a per-image *estimate* over the real test set — a
-static analysis of the backbone that excludes the exit heads' own small cost
-and all routing overhead. For ResNet50 it reads as ~19% of estimated compute
-gone for a 1.7% accuracy cost, with 58% of images never reaching `layer4`.
-An estimated FLOPs saving is not a latency claim: wall-clock speedup is
-hardware- and input-dependent; see the
-[latency appendix](#appendix-wall-clock-latency-legacy) before quoting one.
-When judging a deployment, also benchmark a smaller static model at matched
-accuracy (pass it as a third entry to `benchmark_models`) — if a plain
-ResNet18 matches your routed ResNet50, ship the ResNet18.
-
-The MobileNetV2 row is a loss, and it's in the table anyway. An
-already-compressed backbone leaves little for early exit to skim: only 8.5%
-of images leave early, so the wrapper still does ~94% of the work. Rule of
-thumb from these runs: the deeper and heavier the backbone, the more there is
-to save.
-
-Reproduce with `python scripts/run_benchmarks.py` (trains and benchmarks) or
-`python scripts/re_evaluate.py` (from checkpoints). Raw numbers live in
-[`docs/benchmarks.json`](docs/benchmarks.json).
-
-## Measured results (v0.3 fair runner — bounded evidence run)
-
-One seeded, deliberately small validation run (2 epochs per stage, RTX 4050
-Laptop GPU, CIFAR-10 at 224px, disjoint train/temperature/calibration/test
-splits, identical samples and boundaries for all three models). Full data
-and honest interpretation: [`docs/evidence/CUDA_EVIDENCE.md`](docs/evidence/CUDA_EVIDENCE.md).
+One seeded validation run (2 epochs per stage, RTX 4050 Laptop GPU, CIFAR-10
+at 224px, seed 42, disjoint train/temperature/calibration/test splits,
+identical samples and timing boundaries for all three models). Full
+methodology: [`docs/evidence/CUDA_EVIDENCE.md`](docs/evidence/CUDA_EVIDENCE.md).
+This is one bounded run on one GPU, not a universal speedup claim.
 
 | Model | Test acc | p50 | p95 | Throughput | Est. FLOPs fraction |
 |---|---:|---:|---:|---:|---:|
 | ResNet-18 backbone | 94.07% | 1.33 ms | 1.51 ms | 712 ips | 1.00 |
-| ResNet-18 early-exit | 92.92% | 1.43 ms | 1.46 ms | 782 ips (**1.10×**) | 0.88 (estimate) |
+| ResNet-18 early-exit | 92.92% | 1.43 ms | 1.46 ms | 782 ips (**1.10×**) | ~0.92 (estimate†) |
 | MobileNetV2 static baseline | 92.67% | 1.40 ms | 1.48 ms | 702 ips (0.99×) | 1.00 |
 
-Read the negative parts too: the early-exit **median** latency is worse than
-the backbone's (routing overhead on the 70% of images that don't exit); the
-gain is in throughput and the tail (p95/p99), and the static baseline is
-competitive at this training budget. That's the honest shape of early exit
-on a fast GPU — reproduce with `python scripts/evidence_run.py`.
+† The run originally recorded 0.88, produced by a flagged low-confidence
+estimator fallback ([#6](https://github.com/sohams25/earlyon/issues/6));
+fvcore attribution gives ~0.92, i.e. roughly an 8% estimated-compute saving.
+See the erratum in the evidence doc. Measured columns are unaffected.
 
-## How it compares
+In this run, early exiting improved throughput by about 10%, but median
+latency was slightly worse because exit-head and routing overhead offset
+part of the saved backbone computation on the ~70% of images that ran the
+full network; the gain shows up in throughput and the tail (p95/p99). A
+static MobileNetV2 baseline remained competitive. The result shows why
+early-exit systems should be measured end to end rather than judged only by
+estimated FLOPs. A noise-input variant reached 2.05× — that is a synthetic
+best-case bound (trained heads can fire spuriously on noise), not practical
+performance. Reproduce with `python scripts/evidence_run.py`. Older pre-v0.3
+measurements are quarantined under `legacy_v0_2` in
+[`docs/benchmarks.json`](docs/benchmarks.json); they are not methodologically
+comparable and are not shown here.
 
-Compression makes the model cheaper for every input; early exit spends
-compute per input. They stack.
+## Why not just deploy a smaller model?
 
-|  | earlyon | per-paper research code | pruning / distillation |
-|---|---|---|---|
-| works on your existing backbone | yes, via hooks | one architecture each | retrain required |
-| adapts compute per input | yes | yes, for that model | no, fixed cost |
-| full accuracy still reachable | yes, hard inputs run everything | yes | no, capacity is gone |
-| pip install, tests, CI | yes | rarely | yes, mature tools |
-
-If you already prune or distill, wrap the compressed model and take both
-savings.
+Often you should. A static model has a fixed cost for every input; early
+exit adapts computation per input. When input difficulty varies a lot,
+adaptation can win; a smaller static model may still be faster or simpler.
+Early exit is useful when input difficulty varies, but it is not a
+replacement for testing smaller fixed-cost models. The right baseline is
+part of the benchmark, not an afterthought — which is why
+`benchmark_models` takes the static model as a first-class entry and feeds
+every compared model identical samples with identical timing boundaries.
+Compression (pruning, distillation) and early exit are also composable: a
+compressed backbone can be wrapped, and the benchmark decides whether the
+combination actually helps.
 
 ## Usage
 
@@ -212,7 +226,8 @@ calibrate_thresholds(model, val, target_accuracy_drop=0.01)
 # 4. deploy
 model.eval()
 result = model(torch.randn(1, 3, 224, 224), mode="inference")
-print(result.exit_taken, result.confidence, result.computation_used)
+# estimated fraction of backbone FLOPs executed — not measured latency or energy
+print(result.exit_taken, result.confidence, result.estimated_backbone_flops_fraction)
 ```
 
 The inference path runs under `torch.inference_mode()` internally, so the
@@ -226,7 +241,8 @@ from earlyon.core.thresholds import calibrate_thresholds_for_budget
 
 result = calibrate_thresholds_for_budget(model, val, target_computation=0.8)
 result.budget_met            # False (plus a warning) if 0.8 is unreachable
-result.avg_computation_used  # measured on the calibration set
+result.avg_computation_used  # estimated FLOPs fraction, averaged over the
+                             # calibration set — an estimate, not a measurement
 ```
 
 An unreachable budget warns and reports `budget_met=False` rather than
@@ -303,6 +319,38 @@ config). The full contract is in
 The reasoning for each choice, including the ugly parts, is in
 [`docs/DESIGN_DECISIONS.md`](docs/DESIGN_DECISIONS.md).
 
+## Execution and export modes
+
+Three ways to run a calibrated model. They are not interchangeable:
+
+- **Eager routed execution** (`model(x, mode="inference")`) — dynamic
+  routing that can stop after an exit. This is the primary reference
+  behavior. It carries Python control-flow and host-synchronization
+  overhead, and `torch.compile` refuses it with a clear error.
+- **All-exits ONNX export** (`export_all_exits_to_onnx`) — a static graph
+  that computes **every** configured exit. Useful for export and analysis;
+  it does not save later-stage computation and is not conditional early
+  exit.
+- **Reference staged execution** (`earlyon.staged`) — splits supported
+  (Sequential-shaped) models into stages so later stages genuinely never
+  run after an exit fires. Tested for eager-equivalence, including a test
+  that later stages do not execute. It supports only the documented
+  contract; it is not a universal graph partitioner, and no TensorRT
+  performance is claimed. See
+  [`docs/STAGED_DEPLOYMENT.md`](docs/STAGED_DEPLOYMENT.md).
+
+## Jetson and TensorRT status
+
+Jetson monitoring and measurement procedures are documented
+([`docs/STAGED_DEPLOYMENT.md`](docs/STAGED_DEPLOYMENT.md)): tegrastats
+profiling with energy integrated over the timed window when valid telemetry
+exists, and unavailable telemetry reported as unavailable (`None`), never as
+zero. **No Jetson performance result has been published** — none has been
+measured. TensorRT deployment performance has not been measured either; the
+staged runtime is a framework contract, not proof of TensorRT deployment.
+The CUDA table above is a laptop-GPU run and does not predict Jetson
+behavior.
+
 ## Limitations
 
 - `forward(mode="inference")` is batch-size 1 — the latency-sensitive edge
@@ -312,33 +360,32 @@ The reasoning for each choice, including the ugly parts, is in
 - Eager routing has real overhead: every enabled exit evaluates its head and
   synchronises the host (`.item()`) to decide. On a GPU that synchronisation
   can cost more than the skipped layers save, particularly on small
-  backbones — theoretical FLOP savings do not guarantee latency savings.
+  backbones — estimated FLOP savings do not guarantee latency savings.
   The fair runner reports both so you can see it.
-- `torch.compile` cannot trace the routing control flow. The wrapper raises a
-  clear error instead of silently falling back; compile the raw backbone if
-  you need it.
-- ONNX export (`export_all_exits_to_onnx`) writes a static graph that
-  computes **every** exit and leaves routing to the caller — it does not
-  short-circuit compute. For a deployable split that genuinely skips later
-  stages, see [`docs/STAGED_DEPLOYMENT.md`](docs/STAGED_DEPLOYMENT.md)
-  (reference implementation for Sequential backbones).
-- `computation_used` / `estimated_backbone_flops_fraction` is a static
-  estimate: exit-head cost and routing overhead excluded; backbones that
-  reuse modules degrade to a warned low-confidence uniform estimate.
+- `estimated_backbone_flops_fraction` is a static estimate of backbone
+  computation only: exit-head and routing costs are excluded, it is not
+  measured latency, power or energy, and backbones that reuse modules
+  degrade to a warned low-confidence uniform estimate. Ambiguous
+  architectures may not have a precise estimate at all.
 - Compute budgets from `calibrate_thresholds_for_budget` hold as an average
   over the calibration distribution. Nothing caps FLOPs per sample.
-- Benchmarks are CIFAR-10 on a laptop GPU, and the published table predates
-  the v0.3 fair runner (see the legacy labels). ImageNet-scale numbers and a
-  real Jetson table don't exist yet; treat any wall-clock claim accordingly.
+- The published benchmark is one bounded CIFAR-10 run on one laptop GPU.
+  ImageNet-scale numbers and a real Jetson table don't exist yet; treat any
+  wall-clock claim accordingly.
 
 ## Checkpoint migration
 
-Checkpoints are versioned (`format_version: 2`). Files written by earlyon
-≤ 0.2 load with an automatic, deterministic migration (scalar temperature
-broadcast per head; legacy "disabled" threshold sentinels become explicit
-`enabled_exits=False`) and a warning describing what changed — pinned
-against a genuine v0.2-written fixture in the test suite. Details and code
-changes: [`docs/MIGRATION.md`](docs/MIGRATION.md).
+Checkpoints are versioned (`format_version: 2`) and record the exit
+configuration, per-head temperatures, enabled exits, thresholds and routing
+policy, plus reconstruction metadata where supported. Files written by
+earlyon ≤ 0.2 load with an automatic, deterministic migration (scalar
+temperature broadcast per head; legacy "disabled" threshold sentinels become
+explicit `enabled_exits=False`) and a warning describing what changed — the
+migration is verified against a genuine prior-version checkpoint in the
+test suite. Keep a backup before migrating checkpoints you care about, and
+read [`docs/MIGRATION.md`](docs/MIGRATION.md) for the code-level changes
+(including where backward-compatible aliases like `computation_used` are
+documented).
 
 ## Reproducibility
 
@@ -362,11 +409,14 @@ Bug reports and benchmark results from your hardware are welcome. Start with
 
 ## Roadmap
 
-- ImageNet-scale benchmark runs, and a measured Jetson Orin table to replace
-  the "profile it yourself" answer.
-- Masked per-sample routing inside a batch (the v0.3 target).
-- Grow the backbone factory list as people ask; `custom_ee` covers the gap
-  meanwhile.
+Broad feature development is currently frozen. Planned work is narrow and
+evidence-driven:
+
+- real Jetson measurements (the documented procedure, run on a device);
+- TensorRT integration only when backed by measured evidence;
+- user-reported compatibility fixes and PyTorch/torchvision compatibility;
+- broader staged-runtime support only when justified by real demand;
+- additional reproducible hardware evidence (including ImageNet-scale runs).
 
 ## Used By
 
@@ -392,26 +442,6 @@ If earlyon saves your model some FLOPs, a citation is welcome:
 BranchyNet (Teerapittayanon et al. 2016) and the ACM 2024 early-exit survey
 (10.1145/3698767) for the ideas; torchvision (BSD) for the backbones; fvcore
 for FLOPs accounting. earlyon itself is MIT.
-
-## Appendix: wall-clock latency (legacy)
-
-**Legacy numbers**: measured with the pre-v0.3 runner, which benchmarked the
-wrapper and backbone on *different* random inputs — not methodologically
-comparable to `benchmark_models` results, which feed every compared model
-the identical sample sequence. Kept for transparency until re-measured.
-
-Throughput below uses a random-noise input, which can trigger spurious early
-exits, so read it as a best-case bound rather than a claim. RTX 4050 Laptop
-GPU, batch 1, 224×224, 50-iteration warmup, 300 iterations.
-
-| Model       | Backbone p50 | Wrapper p50 (noise input) |
-|-------------|-------------:|--------------------------:|
-| ResNet18    |      1.32 ms |                   0.51 ms |
-| ResNet50    |      2.81 ms |                   3.03 ms |
-| MobileNetV2 |       TBD ms |                    TBD ms |
-
-Reproducible via `scripts/re_evaluate.py`; raw per-run data in
-[`docs/benchmarks.json`](docs/benchmarks.json).
 
 ## License
 

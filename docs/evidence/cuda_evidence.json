@@ -259,5 +259,14 @@
     "gpu": "NVIDIA GeForce RTX 4050 Laptop GPU",
     "earlyon": "0.2.0",
     "os": "Linux-6.8.0-106-generic-x86_64-with-glibc2.35"
+  },
+  "erratum_2026_07_22": {
+    "issue": "https://github.com/sohams25/earlyon/issues/6",
+    "affected_fields": [
+      "test.early_exit_estimated_flops_fraction",
+      "benchmark_real_input.*.avg_estimated_flops_fraction",
+      "benchmark_noise_input.*.avg_estimated_flops_fraction"
+    ],
+    "note": "estimated FLOPs fractions in this run derive from the low-confidence uniform fallback (reuse detector false-positive on torchvision ResNet's zero-FLOP shared in-block ReLU; FlopsEstimate.reliable=False). Under fvcore leaf-walk attribution the per-exit fractions are layer2=0.5474, layer3=0.7736 and the test-set average estimated fraction is 0.918 instead of the recorded 0.880 (~8% estimated saving, not 12%). Measured accuracy/latency/throughput/exit-distribution values are unaffected. Original recorded fields left unmodified."
   }
 }

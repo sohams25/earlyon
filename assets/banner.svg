@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" role="img" aria-label="earlyon: early-exit inference for PyTorch CV models. An easy input enters layer1 and leaves at exit 0, using 12% of the network; layer2, layer3 and layer4 stay unused." font-family="ui-monospace, Menlo, Consolas, monospace">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" role="img" aria-label="earlyon: train, calibrate, and benchmark early-exit vision models. Illustration: an easy input enters layer1 and leaves at exit 0; layer2, layer3 and layer4 stay unused." font-family="ui-monospace, Menlo, Consolas, monospace">
   <title>earlyon</title>
-  <desc>Masthead for earlyon. An easy input enters layer1 and leaves the network at exit 0 (12% of compute); layer2, layer3 and layer4 stay unused.</desc>
+  <desc>Masthead for earlyon. Illustration of early exit: an easy input enters layer1 and leaves the network at exit 0; layer2, layer3 and layer4 stay unused.</desc>
 
   <!-- accent = exited early / compute saved; neutral = ran everything -->
   <defs>
@@ -18,7 +18,7 @@
 
   <!-- masthead -->
   <text x="70" y="122" font-size="74" font-weight="700" letter-spacing="-2" fill="#E6EDF3">earlyon</text>
-  <text x="73" y="162" font-size="25" fill="#8B949E">Early-exit inference for PyTorch CV models.</text>
+  <text x="73" y="162" font-size="25" fill="#8B949E">Train, calibrate, and benchmark early-exit vision models.</text>
   <line x1="72" y1="196" x2="1116" y2="196" stroke="#30363D" stroke-width="1.5"/>
 
   <!-- ===== backbone spine ===== -->
@@ -47,6 +47,6 @@
 
     <rect x="101" y="332" width="160" height="56" rx="6" fill="#16241D" stroke="#56B98A" stroke-width="2"/>
     <text x="119" y="366" font-size="22" fill="#56B98A">exit 0</text>
-    <text x="243" y="366" font-size="20" text-anchor="end" fill="#56B98A">12%</text>
+    <text x="243" y="366" font-size="20" text-anchor="end" fill="#56B98A">taken</text>
   </g>
 </svg>
