@@ -7,7 +7,7 @@
   <img alt="python" src="https://img.shields.io/badge/python-3.10+-blue">
   <img alt="coverage" src="https://img.shields.io/badge/coverage-95%25-brightgreen">
   <img alt="mypy" src="https://img.shields.io/badge/mypy-strict-blue">
-  <img alt="version" src="https://img.shields.io/badge/version-0.2.0-lightgrey">
+  <img alt="version" src="https://img.shields.io/badge/version-0.3.0-lightgrey">
   <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-green"></a>
 </p>
 
@@ -383,7 +383,7 @@ If earlyon saves your model some FLOPs, a citation is welcome:
   year         = {2026},
   publisher    = {GitHub},
   howpublished = {\url{https://github.com/sohams25/earlyon}},
-  note         = {Version 0.2.0}
+  note         = {Version 0.3.0}
 }
 ```
 

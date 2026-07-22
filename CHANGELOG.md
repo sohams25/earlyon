@@ -2,7 +2,7 @@
 
 format follows [keep a changelog](https://keepachangelog.com/en/1.1.0/).
 
-## unreleased
+## 0.3.0 - 2026-07-22
 
 ### changed — calibration & routing correctness (breaking-ish, migrated)
 - **per-head temperatures**: `EarlyExitConfig.temperatures` maps every head

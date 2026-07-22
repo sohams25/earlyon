@@ -4,7 +4,7 @@ from earlyon.core.exit_head import EarlyExitHead
 from earlyon.core.types import BatchedInferenceResult, EarlyExitConfig, ExitPoint, InferenceResult
 from earlyon.core.wrappers import EarlyExitWrapper
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "EarlyExitWrapper",

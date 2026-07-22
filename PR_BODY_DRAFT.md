@@ -1,7 +1,7 @@
-# PR draft: earlyon 0.3 — correctness hardening + release readiness
+# Release v0.3.0: defensible calibration, fair benchmarks, and staged inference
 
-> Draft only. Not opened. Base: `main`. Head: `claude/earlyon-release-readiness`
-> (includes `claude/earlyon-hardening`).
+> Base: `main`. Head: `claude/earlyon-release-readiness`
+> (includes the `claude/earlyon-hardening` work).
 
 ## What this PR is
 
