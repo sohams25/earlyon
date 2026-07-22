@@ -238,6 +238,35 @@ Every command takes `--help`. The rest of the toolkit: `train joint`,
 `calibrate --target-compute`, `analyze` (per-exit accuracy), `profile`
 (Jetson power), `export` (ONNX).
 
+## Architecture
+
+```
+            input (batch 1)
+              │
+   ┌──────────▼──────────┐   hook    ┌────────────┐  softmax(logits / T_e0)
+   │ backbone stage 0..k │──────────▶│ exit head 0│──┐ enabled? confidence ≥ thr?
+   └──────────┬──────────┘           └────────────┘  │ yes → return logits, STOP
+              │ (only if exit 0 didn't fire)         │ no  ▼ continue
+   ┌──────────▼──────────┐   hook    ┌────────────┐  │
+   │ backbone stage k..m │──────────▶│ exit head 1│──┤  each head has its OWN
+   └──────────┬──────────┘           └────────────┘  │  temperature T and its
+              │                                      │  own enabled flag
+   ┌──────────▼──────────┐                           │
+   │ rest of backbone    │───────▶ final classifier ─┘  (T_final)
+   └─────────────────────┘
+
+   training mode: every head produces logits (no routing) → weighted CE loss
+   calibration:   collect logits once → fit T per head → greedy threshold grid
+   deployment:    eager wrapper (above), or staged stages (docs/STAGED_DEPLOYMENT.md)
+```
+
+Three concerns, kept separate: **training** (two-stage by default: your
+backbone recipe untouched, then small heads on a frozen backbone),
+**calibration** (per-head temperatures + threshold/enablement search on held-
+out splits), and **routing** (pure inference-time policy driven by the
+config). The full contract is in
+[`docs/CALIBRATION_AND_BENCHMARK_CONTRACT.md`](docs/CALIBRATION_AND_BENCHMARK_CONTRACT.md).
+
 ## How it works
 
 1. Forward hooks attach the exit heads at the named layers, so the backbone
@@ -282,6 +311,29 @@ The reasoning for each choice, including the ugly parts, is in
 - Benchmarks are CIFAR-10 on a laptop GPU, and the published table predates
   the v0.3 fair runner (see the legacy labels). ImageNet-scale numbers and a
   real Jetson table don't exist yet; treat any wall-clock claim accordingly.
+
+## Checkpoint migration
+
+Checkpoints are versioned (`format_version: 2`). Files written by earlyon
+≤ 0.2 load with an automatic, deterministic migration (scalar temperature
+broadcast per head; legacy "disabled" threshold sentinels become explicit
+`enabled_exits=False`) and a warning describing what changed — pinned
+against a genuine v0.2-written fixture in the test suite. Details and code
+changes: [`docs/MIGRATION.md`](docs/MIGRATION.md).
+
+## Reproducibility
+
+- `pytest -m "not gpu"` — full CPU suite; `pytest -m gpu` on a CUDA host.
+- `python scripts/smoke_test.py` — post-install smoke against an installed
+  wheel (run it from outside the repo).
+- `python scripts/evidence_run.py` — the bounded, seeded CIFAR-10 evidence
+  experiment (CUDA; explicit train/temperature/calibration/test splits,
+  epoch caps, wall-clock budget). Output lands in `docs/evidence/`.
+- `python scripts/run_benchmarks.py` — the longer train+calibrate+benchmark
+  pipeline that regenerates `docs/benchmarks.json` (`runs` key).
+- Jetson: the exact procedure (tegrastats profiling, per-stage TensorRT) is
+  in [`docs/STAGED_DEPLOYMENT.md`](docs/STAGED_DEPLOYMENT.md); no Jetson
+  numbers are published because none have been measured.
 
 ## Contributing
 
