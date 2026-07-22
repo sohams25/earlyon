@@ -1,7 +1,8 @@
 # Security review — earlyon 0.3 release candidate
 
 Date: 2026-07-22. Scope: the `earlyon` package, scripts, tests, docs and
-packaged artifacts on branch `claude/earlyon-release-readiness`.
+packaged artifacts on the v0.3.0 release-readiness branch (merged to
+`main` via PR #5).
 
 ## Checkpoint trust assumptions
 
