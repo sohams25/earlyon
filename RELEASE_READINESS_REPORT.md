@@ -15,10 +15,11 @@ no Jetson/TensorRT claims exist because no such hardware exists here.
 
 ## 2. Branches / commits
 
-- Starting point: `claude/earlyon-hardening` @ `db3832e` (8 hardening
+- Starting point: the v0.3 hardening branch @ `db3832e` (8 hardening
   commits on `main` @ `a5f8414`), working tree clean, untouched.
-- Work branch: `claude/earlyon-release-readiness` (created from hardening
-  HEAD; hardening commits preserved, not rebased/squashed).
+- Work branch: the release-readiness branch, created from the hardening
+  HEAD (hardening commits preserved, not rebased/squashed); merged to
+  `main` via PR #5 and since deleted.
 - Final HEAD: the last commit listed in §16.
 
 ## 3. Environment
@@ -174,7 +175,8 @@ and docs. (API changes from the hardening branch are summarized in
 README (architecture diagram, evidence-run results table with negative-
 result interpretation, checkpoint-migration + reproducibility sections,
 corrected badge), `docs/MIGRATION.md`, `SECURITY_REVIEW.md`,
-`PR_BODY_DRAFT.md`, `docs/evidence/CUDA_EVIDENCE.md`, updated
+`PR_BODY_DRAFT.md` (draft since superseded by PR #5 and removed),
+`docs/evidence/CUDA_EVIDENCE.md`, updated
 `RELEASE_NOTES_DRAFT.md` and `CHANGELOG.md`, `tests/fixtures/README.md`.
 
 ## 15. Files changed (this branch, 17 files)
@@ -185,9 +187,9 @@ corrected badge), `docs/MIGRATION.md`, `SECURITY_REVIEW.md`,
   `run_benchmarks.py` / `re_evaluate.py` / examples (lint/format only)
 - packaging: `MANIFEST.in` (new)
 - docs: README, CHANGELOG, RELEASE_NOTES_DRAFT, MIGRATION, SECURITY_REVIEW,
-  PR_BODY_DRAFT, docs/evidence/* (this report)
+  PR_BODY_DRAFT (since removed), docs/evidence/* (this report)
 
-## 16. Local commits (`claude/earlyon-hardening..HEAD`)
+## 16. Local commits (release-readiness work on top of the hardening branch)
 
 1. `5d821aa` chore: bring scripts and examples up to the lint/format gate
 2. `de8ce1c` test: independent release audit — adversarial verification
@@ -210,18 +212,17 @@ corrected badge), `docs/MIGRATION.md`, `SECURITY_REVIEW.md`,
   after first inference.
 - Version bump to 0.3.0 + changelog dating at actual release time.
 
-## 18. Commands for the user (NOT executed)
+## 18. Release commands (since executed — kept for the record)
+
+The steps below were subsequently carried out: the branch was merged via
+PR #5, `v0.3.0` was tagged and the GitHub Release published. Only the PyPI
+upload remains (blocked on trusted-publisher setup; see
+`PUBLIC_RELEASE_REPORT.md`).
 
 ```bash
-# inspect
-git log --oneline main..claude/earlyon-release-readiness
-git diff main...claude/earlyon-release-readiness
-
-# push + PR
-git push -u origin claude/earlyon-release-readiness
-gh pr create --base main --head claude/earlyon-release-readiness \
-  --title "earlyon 0.3: correctness hardening + release readiness" \
-  --body-file PR_BODY_DRAFT.md
+# push + PR (done: PR #5, merged)
+gh pr create --base main \
+  --title "Release v0.3.0: defensible calibration, fair benchmarks, and staged inference"
 
 # after merge: version bump, tag, publish
 #   edit pyproject.toml + earlyon/__init__.py -> 0.3.0; date the CHANGELOG

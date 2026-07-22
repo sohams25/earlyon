@@ -48,8 +48,6 @@ datasets/
 raw_earlyon.md
 logs/
 docs/*.pth
-.claude/scheduled_tasks.lock
-.claude/settings.local.json
 
 # local agent config, never ship
 CLAUDE.md
